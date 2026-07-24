@@ -1,0 +1,10 @@
+{
+  "distribution": "notebooklm-mcp-audio-custom",
+  "custom_version": "0.0.1",
+  "upstream": {
+    "repository": "https://github.com/PleasePrompto/notebooklm-mcp.git",
+    "tag": "v2.0.0",
+    "commit": "50b3e7f67f8535d9899c5e2b1b68f37d17b72aef"
+  },
+  "notice": "The original upstream author is retained in package.json contributors metadata. Repository, homepage and bugs now point to the custom distribution."
+}
