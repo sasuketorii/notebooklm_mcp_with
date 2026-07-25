@@ -1,6 +1,6 @@
 # NotebookLM MCP 音声アップロード版：新規環境セットアップ
 
-このフォルダは `notebooklm-mcp` v2.0.0 を基点にしたローカルfork（カスタム版 `0.0.1`）です。通常の `add_source`（Web URL／貼り付けテキスト）は変更せず、音声・YouTube登録、解析準備待ち、文字起こしエクスポートを追加しています。
+このフォルダは `notebooklm-mcp` v2.0.0 を基点にしたローカルfork（カスタム版 `0.0.2`）です。通常の `add_source`（Web URL／貼り付けテキスト）は変更せず、音声・YouTube登録、解析準備待ち、文字起こしエクスポートを追加しています。
 
 基本フローは `add_source(type=url)`（通常Webサイト）または `add_youtube_source`／`add_audio_source` → `wait_for_source_ready` → `export_transcript` です。`export_transcript` はNotebookLMのソースビューア表示を直接抽出します（チャットのモデル申告ではありません）が、元メディアとの独立検証は行わず、上限により部分結果になる場合があります。Drive、PDF/DOCX/画像など一般ファイル、音声以外のStudio生成物は未対応です。
 
@@ -17,6 +17,11 @@
 - `chrome_profile/`、`browser_state/`、`data/`（Googleログインを再利用できる機密情報）
 - `.env`、APIキー、Cookie、セッション情報
 - `node_modules/`、`dist/`、キャッシュ、音声ファイル
+
+`get_health` はブラウザやネットワークを起動せず、実行中のNotebookLM readiness
+または保守的なスナップショット証拠だけを返します。保存済みCookieが現在もGoogleに
+受理されることを保証するものではありません。`setup_auth` と通常実行はプロファイルの
+プロセス間リースを取得し、競合時は `profile_busy` を返します。`re_auth` は利用不可です。
 
 配布前の内容確認とチェックサムは次で作れます。
 
@@ -59,7 +64,7 @@ notebooklm-audio の setup_auth を show_browser=true で実行して
 
 Googleログインと2段階認証を完了します。以後、CookieとChromeプロファイルはOSごとのアプリデータ領域に保存され、CodexとClaudeは同一OSユーザーであれば共用します。
 
-`setup_auth` は既存の認証状態を保持したまま可視ブラウザを開きます。アカウント切替や壊れた認証を完全に消してやり直す場合だけ、破壊的な `re_auth` を使用します。
+`setup_auth` は既存の認証状態を保持したまま可視ブラウザを開きます。現在 `re_auth` は安全な段階Profile切替が未実装のため、既存の認証を変更せず fail-closed で終了します。アカウントを分ける場合は別OSユーザーまたは `NOTEBOOKLM_ACCOUNT` の別データ領域を使用してください。
 
 | OS | プロファイル保存先 |
 |---|---|
@@ -93,7 +98,7 @@ Googleログインと2段階認証を完了します。以後、CookieとChrome�
 
 実行用ユーザーを作り、その同一ユーザーでインストール、認証、常駐を行います。rootとサービスユーザーで認証プロファイルを共有しないでください。`--audio-root` に指定する音声パスは**VPSローカルのパス**です。Telegram等から受け取る場合も、先にそのサービスユーザーだけが書込できるVPS内の入力ディレクトリへ保存し、そのディレクトリだけを許可します。
 
-1つのChromeプロファイルは1つの信頼境界です。異なる依頼者・Googleアカウント・テナントで認証プロファイルを共用せず、アカウントごとに別OSユーザーまたは別データディレクトリを用意してください。同じプロファイルに対して、`setup_auth` / `re_auth` / 通常のブラウザ操作を同時実行しないでください。
+1つのChromeプロファイルは1つの信頼境界です。異なる依頼者・Googleアカウント・テナントで認証プロファイルを共用せず、アカウントごとに別OSユーザーまたは別データディレクトリを用意してください。同じプロファイルに対して、`setup_auth` と通常のブラウザ操作を同時実行しないでください。`re_auth` は利用不可です。
 
 初回ログインだけは表示付きのブラウザが必要です。VPSにGUIがなければ、短時間だけXvfb＋noVNCまたはSSH X11転送を使い、`setup_auth` を `show_browser=true` で実行します。ログイン後は通常 `HEADLESS=true` で構いません。
 
@@ -130,6 +135,6 @@ HEADLESS=true ./scripts/start-http.sh
 
 - **`No target notebook selected`**: `notebook_id` / `notebook_url` を渡すか、`select_notebook` を先に実行します。
 - **ファイル選択UIが見つからない**: NotebookLM UIが更新された可能性があります。`show_browser=true` で再現し、セレクタを更新します。
-- **プロファイルはあるがログイン画面になる**: Google側でセッションが無効化されています。`setup_auth` または `re_auth` を可視ブラウザで実行します。
+- **プロファイルはあるがログイン画面になる**: Google側でセッションが無効化されています。`setup_auth` を可視ブラウザで実行します。
 - **VPSでブラウザが起動しない**: Chrome依存パッケージと一時ディスプレイを確認し、初回認証をXvfb/noVNCで行います。
 - **アップロード成功後すぐ質問して内容がない**: NotebookLMの解析待ちです。ソース欄の状態を確認してから再試行します。

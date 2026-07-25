@@ -1,7 +1,7 @@
 # NotebookLM MCP with Audio (custom fork)
 
 Repository: <https://github.com/sasuketorii/notebooklm_mcp_with><br>
-Version: **0.0.1 (source-only distribution)**
+Version: **0.0.2 (source-only distribution)**
 
 This is a maintained custom fork of [PleasePrompto/notebooklm-mcp](https://github.com/PleasePrompto/notebooklm-mcp). It keeps NotebookLM chat, web-URL/text sources, library and audio-overview tools, and adds a bounded local-audio/YouTube workflow. It is intended for local or single-principal use through Codex or Claude Code; it is not an npm package release.
 
@@ -27,7 +27,7 @@ The source viewer output is not an independently verified, verbatim transcript o
 **Questions and sources:** `ask_question`, `add_source` (URL or pasted text), `add_audio_source`, `add_youtube_source`, `wait_for_source_ready`, `export_transcript`<br>
 **Audio Overview:** `generate_audio`, `get_audio_status`, `download_audio`<br>
 **Notebook library:** `add_notebook`, `list_notebooks`, `get_notebook`, `select_notebook`, `update_notebook`, `remove_notebook`, `search_notebooks`, `get_library_stats`<br>
-**Sessions/system:** `list_sessions`, `close_session`, `reset_session`, `get_health`, `setup_auth`, `re_auth`, `cleanup_data`<br>
+**Sessions/system:** `list_sessions`, `close_session`, `reset_session`, `get_health`, `setup_auth`; compatibility endpoints `re_auth` (unavailable/fail-closed) and `cleanup_data` (preview-only)<br>
 
 Full schemas and return envelopes are in [`docs/tools.md`](./docs/tools.md).
 
@@ -74,7 +74,7 @@ In the same OS user that will run the MCP server, ask either client:
 Run notebooklm-audio setup_auth with show_browser=true.
 ```
 
-ログイン画面を表示してGoogleログインを完了してください。認証プロファイルはOSユーザーのアプリデータ領域に保存されます。アカウントを切り替える、または壊れた状態を完全に消す場合だけ `re_auth` を使います。VPS/headless Linuxでは初回のみ `xvfb-run`、noVNC、またはSSH X11で表示を提供し、その後は `HEADLESS=true` で常駐できます。rootとサービスユーザーでプロファイルを共有しないでください。
+ログイン画面を表示してGoogleログインを完了してください。認証プロファイルはOSユーザーのアプリデータ領域に保存されます。`re_auth` は現在利用不可で、アカウント切替や認証削除は行いません。VPS/headless Linuxでは初回のみ `xvfb-run`、noVNC、またはSSH X11で表示を提供し、その後は `HEADLESS=true` で常駐できます。rootとサービスユーザーでプロファイルを共有しないでください。
 
 ## Workflows / ワークフロー
 
@@ -113,9 +113,9 @@ NotebookLMのUI変更に対するAPI互換性は保証しません。継続運�
 
 ## VPS/headless operations / VPS運用
 
-Use one service OS user and one Chrome profile per Google account/trust boundary. Keep the audio inbox private and writable only by that service. Run HTTP on loopback and front it with a private, authenticated proxy if needed. Serialize authentication and audio uploads where possible; do not run `setup_auth`, `re_auth`, and normal browser work concurrently against one profile.
+Use one service OS user and one Chrome profile per Google account/trust boundary. Keep the audio inbox private and writable only by that service. Run HTTP on loopback and front it with a private, authenticated proxy if needed. Authentication uses a cross-process base-profile lease: contending runtime/setup operations return `profile_busy`; runtime may use a disposable isolated profile only with a bootstrap-eligible snapshot, while `single` never falls back. `re_auth` is unavailable and fails closed until safe staged-profile switching exists. `get_health` is offline: `runtime_verified` is live evidence from this process, `snapshot_usable` is unexpired persistent-cookie evidence, and neither guarantees Google will accept saved cookies on the next request.
 
-VPSでは実行専用OSユーザーとGoogleアカウントごとのChromeプロファイルを用意し、音声入力ディレクトリをそのユーザーだけが書けるようにします。認証・音声登録は同一プロファイルで直列化し、`setup_auth`、`re_auth`、通常操作を同時実行しません。
+VPSでは実行専用OSユーザーとGoogleアカウントごとのChromeプロファイルを用意し、音声入力ディレクトリをそのユーザーだけが書けるようにします。認証・音声登録は同一プロファイルで直列化し、`setup_auth` と通常操作を同時実行しません。`re_auth` は現在利用できません。
 
 ## Upstream updates / 上流追従
 

@@ -5,22 +5,31 @@
  * - Interactive login (headful browser for setup)
  * - Auto-login with credentials (email/password from ENV)
  * - Browser state persistence (cookies + localStorage + sessionStorage)
- * - Cookie expiry validation
- * - State expiry checks (24h file age)
- * - Hard reset for clean start
+ * - Evidence-based snapshot and cookie validation
+ * - Cross-process persistent-profile leasing
  *
  * Based on the Python implementation from auth.py
  */
 
 import type { BrowserContext, ElementHandle, Page } from "patchright";
-import fs from "fs/promises";
-import { chmodSync, existsSync } from "fs";
+import { chmodSync, existsSync, lstatSync } from "fs";
 import path from "path";
+import {
+  BaseProfileLease,
+  inspectStorageState,
+  inspectSnapshotFile,
+  readSecureJson,
+  writeSecureJson,
+  type LeaseRecord,
+  type SnapshotInspection,
+} from "./auth-persistence.js";
+import type { BaseProfileLeaseHandle } from "./auth-persistence.js";
 import { CONFIG, NOTEBOOKLM_AUTH_URL } from "../config.js";
 import { log } from "../utils/logger.js";
 import {
   getPreferredChannel,
   isChannelFailure,
+  isProfileLockError,
   withChannel,
 } from "../browser/chromium-fallback.js";
 import {
@@ -31,30 +40,22 @@ import {
 } from "../utils/stealth-utils.js";
 import type { ProgressCallback } from "../types.js";
 
-/**
- * Critical cookie names for Google authentication
- */
-const CRITICAL_COOKIE_NAMES = [
-  "SID",
-  "HSID",
-  "SSID", // Google session
-  "APISID",
-  "SAPISID", // API auth
-  "OSID",
-  "__Secure-OSID", // NotebookLM-specific
-  "__Secure-1PSID",
-  "__Secure-3PSID", // Secure variants
-];
-
 export class AuthManager {
   private stateFilePath: string;
   private sessionFilePath: string;
+  private baseLease: BaseProfileLease;
 
   constructor() {
     this.stateFilePath = path.join(CONFIG.browserStateDir, "state.json");
     this.sessionFilePath = path.join(CONFIG.browserStateDir, "session.json");
+    this.baseLease = new BaseProfileLease(CONFIG.browserStateDir);
     for (const sensitiveFile of [this.stateFilePath, this.sessionFilePath]) {
-      if (existsSync(sensitiveFile)) chmodSync(sensitiveFile, 0o600);
+      try {
+        const stat = lstatSync(sensitiveFile);
+        if (stat.isFile() && !stat.isSymbolicLink()) chmodSync(sensitiveFile, 0o600);
+      } catch {
+        // Missing or unsafe entries are handled by the no-follow reader/writer.
+      }
     }
   }
 
@@ -69,11 +70,7 @@ export class AuthManager {
     try {
       // Save storage state (cookies + localStorage + IndexedDB)
       const storageState = await context.storageState();
-      await fs.writeFile(this.stateFilePath, JSON.stringify(storageState), {
-        encoding: "utf-8",
-        mode: 0o600,
-      });
-      await fs.chmod(this.stateFilePath, 0o600);
+      await writeSecureJson(this.stateFilePath, storageState);
 
       // Also save sessionStorage if page is provided
       if (page) {
@@ -90,11 +87,7 @@ export class AuthManager {
             return JSON.stringify(storage);
           });
 
-          await fs.writeFile(this.sessionFilePath, sessionStorageData, {
-            encoding: "utf-8",
-            mode: 0o600,
-          });
-          await fs.chmod(this.sessionFilePath, 0o600);
+          await writeSecureJson(this.sessionFilePath, JSON.parse(sessionStorageData));
 
           const entries = Object.keys(JSON.parse(sessionStorageData)).length;
           log.success(`✅ Browser state saved (incl. sessionStorage: ${entries} entries)`);
@@ -116,12 +109,7 @@ export class AuthManager {
    * Check if saved browser state exists
    */
   async hasSavedState(): Promise<boolean> {
-    try {
-      await fs.access(this.stateFilePath);
-      return true;
-    } catch {
-      return false;
-    }
+    return (await this.inspectSnapshot()).bootstrapEligible;
   }
 
   /**
@@ -139,18 +127,23 @@ export class AuthManager {
    * Get valid state path (checks expiry)
    */
   async getValidStatePath(): Promise<string | null> {
-    const statePath = this.getStatePath();
-    if (!statePath) {
-      return null;
-    }
+    // mtime is not authentication evidence.  A snapshot is only a bootstrap
+    // input for an isolated profile, never injected into the base profile.
+    return (await this.inspectSnapshot()).bootstrapEligible ? this.stateFilePath : null;
+  }
 
-    if (await this.isStateExpired()) {
-      log.warning("⚠️  Saved state is expired (>24h old)");
-      log.info("💡 Run setup_auth tool to re-authenticate");
-      return null;
-    }
+  async inspectSnapshot(): Promise<SnapshotInspection> {
+    return inspectSnapshotFile(this.stateFilePath);
+  }
 
-    return statePath;
+  async acquireBaseProfileLease(mode: LeaseRecord["mode"]): Promise<BaseProfileLeaseHandle | null> {
+    return this.baseLease.acquire(mode);
+  }
+  async ownsBaseProfileLease(
+    handle: BaseProfileLeaseHandle,
+    mode: LeaseRecord["mode"]
+  ): Promise<boolean> {
+    return this.baseLease.owns(handle, mode);
   }
 
   /**
@@ -158,8 +151,7 @@ export class AuthManager {
    */
   async loadSessionStorage(): Promise<Record<string, string> | null> {
     try {
-      const data = await fs.readFile(this.sessionFilePath, { encoding: "utf-8" });
-      const sessionData = JSON.parse(data);
+      const sessionData = (await readSecureJson(this.sessionFilePath)) as Record<string, string>;
       log.success(`✅ Loaded sessionStorage (${Object.keys(sessionData).length} entries)`);
       return sessionData;
     } catch (error) {
@@ -178,31 +170,7 @@ export class AuthManager {
   async validateState(context: BrowserContext): Promise<boolean> {
     try {
       const cookies = await context.cookies();
-      if (cookies.length === 0) {
-        log.warning("⚠️  No cookies found in state");
-        return false;
-      }
-
-      // Check for Google auth cookies
-      const googleCookies = cookies.filter((c) => c.domain.includes("google.com"));
-      if (googleCookies.length === 0) {
-        log.warning("⚠️  No Google cookies found");
-        return false;
-      }
-
-      // Check if important cookies are expired
-      const currentTime = Date.now() / 1000;
-
-      for (const cookie of googleCookies) {
-        const expires = cookie.expires ?? -1;
-        if (expires !== -1 && expires < currentTime) {
-          log.warning(`⚠️  Cookie '${cookie.name}' has expired`);
-          return false;
-        }
-      }
-
-      log.success("✅ State validation passed");
-      return true;
+      return inspectStorageState({ cookies, origins: [] }).bootstrapEligible;
     } catch (error) {
       log.warning(`⚠️  State validation failed: ${error}`);
       return false;
@@ -215,69 +183,18 @@ export class AuthManager {
   async validateCookiesExpiry(context: BrowserContext): Promise<boolean> {
     try {
       const cookies = await context.cookies();
-      if (cookies.length === 0) {
-        log.warning("⚠️  No cookies found");
-        return false;
-      }
-
-      // Find critical cookies
-      const criticalCookies = cookies.filter((c) => CRITICAL_COOKIE_NAMES.includes(c.name));
-
-      if (criticalCookies.length === 0) {
-        log.warning("⚠️  No critical auth cookies found");
-        return false;
-      }
-
-      // Check expiration for each critical cookie
-      const currentTime = Date.now() / 1000;
-      const expiredCookies: string[] = [];
-
-      for (const cookie of criticalCookies) {
-        const expires = cookie.expires ?? -1;
-
-        // -1 means session cookie (valid until browser closes)
-        if (expires === -1) {
-          continue;
-        }
-
-        // Check if cookie is expired
-        if (expires < currentTime) {
-          expiredCookies.push(cookie.name);
-        }
-      }
-
-      if (expiredCookies.length > 0) {
-        log.warning(`⚠️  Expired cookies: ${expiredCookies.join(", ")}`);
-        return false;
-      }
-
-      log.success(`✅ All ${criticalCookies.length} critical cookies are valid`);
-      return true;
+      const result = inspectStorageState({ cookies, origins: [] });
+      if (!result.bootstrapEligible) log.warning(`⚠️  Cookie validation failed: ${result.reason}`);
+      return result.bootstrapEligible;
     } catch (error) {
       log.warning(`⚠️  Cookie validation failed: ${error}`);
       return false;
     }
   }
 
-  /**
-   * Check if the saved state file is too old (>24 hours)
-   */
+  /** Return true when the snapshot lacks usable persistent-cookie evidence. */
   async isStateExpired(): Promise<boolean> {
-    try {
-      const stats = await fs.stat(this.stateFilePath);
-      const fileAgeSeconds = (Date.now() - stats.mtimeMs) / 1000;
-      const maxAgeSeconds = 24 * 60 * 60; // 24 hours
-
-      if (fileAgeSeconds > maxAgeSeconds) {
-        const hoursOld = fileAgeSeconds / 3600;
-        log.warning(`⚠️  Saved state is ${hoursOld.toFixed(1)}h old (max: 24h)`);
-        return true;
-      }
-
-      return false;
-    } catch {
-      return true; // File doesn't exist = expired
-    }
+    return !(await this.inspectSnapshot()).usable;
   }
 
   // ============================================================================
@@ -376,12 +293,7 @@ export class AuthManager {
   /**
    * Attempt to authenticate using configured credentials
    */
-  async loginWithCredentials(
-    context: BrowserContext,
-    page: Page,
-    email: string,
-    password: string
-  ): Promise<boolean> {
+  async loginWithCredentials(page: Page, email: string, password: string): Promise<boolean> {
     const maskedEmail = this.maskEmail(email);
     log.warning(`🔁 Attempting automatic login for ${maskedEmail}...`);
 
@@ -411,7 +323,6 @@ export class AuthManager {
     log.info("  🔍 Checking if already authenticated...");
     if (await this.waitForNotebook(page, CONFIG.autoLoginTimeoutMs)) {
       log.success("✅ Already authenticated");
-      await this.saveBrowserState(context, page);
       return true;
     }
 
@@ -423,7 +334,6 @@ export class AuthManager {
       log.success("  ✅ Account selected from chooser");
       if (await this.waitForNotebook(page, CONFIG.autoLoginTimeoutMs)) {
         log.success("✅ Automatic login successful");
-        await this.saveBrowserState(context, page);
         return true;
       }
     }
@@ -433,7 +343,6 @@ export class AuthManager {
     if (!(await this.fillIdentifier(page, email))) {
       if (await this.waitForNotebook(page, CONFIG.autoLoginTimeoutMs)) {
         log.success("✅ Automatic login successful");
-        await this.saveBrowserState(context, page);
         return true;
       }
       log.warning("⚠️  Email input not detected");
@@ -468,7 +377,6 @@ export class AuthManager {
 
     if (await this.waitForRedirectAfterLogin(page, deadline)) {
       log.success("✅ Automatic login successful");
-      await this.saveBrowserState(context, page);
       return true;
     }
 
@@ -879,9 +787,9 @@ export class AuthManager {
    */
   async loadAuthState(context: BrowserContext, statePath: string): Promise<boolean> {
     try {
-      // Read state.json
-      const stateData = await fs.readFile(statePath, { encoding: "utf-8" });
-      const state = JSON.parse(stateData);
+      const state = (await readSecureJson(statePath)) as {
+        cookies?: Parameters<BrowserContext["addCookies"]>[0];
+      };
 
       // Add cookies to context
       if (state.cookies) {
@@ -920,6 +828,7 @@ export class AuthManager {
     overrideHeadless?: boolean
   ): Promise<boolean> {
     const { chromium } = await import("patchright");
+    let context: BrowserContext | undefined;
 
     // Determine headless mode: override or default to true (visible for setup)
     // overrideHeadless contains show_browser value (true = show, false = hide)
@@ -946,13 +855,15 @@ export class AuthManager {
         ],
       };
       const preferred = getPreferredChannel();
-      let context: BrowserContext;
       try {
         context = await chromium.launchPersistentContext(
           CONFIG.chromeProfileDir,
           withChannel(baseLaunchOptions, preferred)
         );
       } catch (err) {
+        if (isProfileLockError(err)) {
+          throw new Error("profile_busy", { cause: err });
+        }
         if (preferred === "chrome" && isChannelFailure(err)) {
           log.warning("⚠️  System Chrome failed to launch — falling back to bundled Chromium.");
           context = await chromium.launchPersistentContext(
@@ -975,150 +886,28 @@ export class AuthManager {
         // ✅ Save browser state to state.json (for validation & backup)
         // Chrome ALSO saves everything to the persistent profile automatically!
         await sendProgress?.("Saving authentication state...", 9, 10);
-        await this.saveBrowserState(context, page);
+        if (!(await this.saveBrowserState(context, page))) return false;
         log.success("✅ Setup complete - authentication saved to:");
         log.success(`  📄 State file: ${this.stateFilePath}`);
         log.success(`  📁 Chrome profile: ${CONFIG.chromeProfileDir}`);
         log.info("💡 Session cookies will now persist across restarts!");
       }
 
-      // Close persistent context
-      await context.close();
-
       return loginSuccess;
     } catch (error) {
+      if (
+        isProfileLockError(error) ||
+        (error instanceof Error && error.message.startsWith("profile_busy"))
+      )
+        throw new Error("profile_busy", { cause: error });
       log.error(`❌ Setup failed: ${error}`);
       return false;
+    } finally {
+      await context?.close().catch(() => undefined);
     }
   }
 
   // ============================================================================
   // Cleanup
   // ============================================================================
-
-  /**
-   * Clear ALL authentication data for account switching
-   *
-   * CRITICAL: This deletes EVERYTHING to ensure only ONE account is active:
-   * - All state.json files (cookies, localStorage)
-   * - sessionStorage files
-   * - Chrome profile directory (browser fingerprint, cache, etc.)
-   *
-   * Use this BEFORE authenticating a new account!
-   */
-  async clearAllAuthData(): Promise<void> {
-    log.warning("🗑️  Clearing ALL authentication data for account switch...");
-
-    let deletedCount = 0;
-
-    // 1. Delete all state files in browser_state_dir
-    try {
-      const files = await fs.readdir(CONFIG.browserStateDir);
-      for (const file of files) {
-        if (file.endsWith(".json")) {
-          await fs.unlink(path.join(CONFIG.browserStateDir, file));
-          log.info(`  ✅ Deleted: ${file}`);
-          deletedCount++;
-        }
-      }
-    } catch (error) {
-      log.warning(`  ⚠️  Could not delete state files: ${error}`);
-    }
-
-    // 2. Delete Chrome profile (THE KEY for account switching!)
-    // This removes ALL browser data: cookies, cache, fingerprint, etc.
-    try {
-      const chromeProfileDir = CONFIG.chromeProfileDir;
-      if (existsSync(chromeProfileDir)) {
-        await fs.rm(chromeProfileDir, { recursive: true, force: true });
-        log.success(`  ✅ Deleted Chrome profile: ${chromeProfileDir}`);
-        deletedCount++;
-      }
-    } catch (error) {
-      log.warning(`  ⚠️  Could not delete Chrome profile: ${error}`);
-    }
-
-    if (deletedCount === 0) {
-      log.info("  ℹ️  No old auth data found (already clean)");
-    } else {
-      log.success(`✅ All auth data cleared (${deletedCount} items) - ready for new account!`);
-    }
-  }
-
-  /**
-   * Clear all saved authentication state
-   */
-  async clearState(): Promise<boolean> {
-    try {
-      try {
-        await fs.unlink(this.stateFilePath);
-      } catch {
-        // File doesn't exist
-      }
-
-      try {
-        await fs.unlink(this.sessionFilePath);
-      } catch {
-        // File doesn't exist
-      }
-
-      log.success("✅ Authentication state cleared");
-      return true;
-    } catch (error) {
-      log.error(`❌ Failed to clear state: ${error}`);
-      return false;
-    }
-  }
-
-  /**
-   * HARD RESET: Completely delete ALL authentication state
-   */
-  async hardResetState(): Promise<boolean> {
-    try {
-      log.warning("🧹 Performing HARD RESET of all authentication state...");
-
-      let deletedCount = 0;
-
-      // Delete state file
-      try {
-        await fs.unlink(this.stateFilePath);
-        log.info(`  🗑️  Deleted: ${this.stateFilePath}`);
-        deletedCount++;
-      } catch {
-        // File doesn't exist
-      }
-
-      // Delete session file
-      try {
-        await fs.unlink(this.sessionFilePath);
-        log.info(`  🗑️  Deleted: ${this.sessionFilePath}`);
-        deletedCount++;
-      } catch {
-        // File doesn't exist
-      }
-
-      // Delete entire browser_state_dir
-      try {
-        const files = await fs.readdir(CONFIG.browserStateDir);
-        for (const file of files) {
-          await fs.unlink(path.join(CONFIG.browserStateDir, file));
-          deletedCount++;
-        }
-        log.info(`  🗑️  Deleted: ${CONFIG.browserStateDir}/ (${files.length} files)`);
-      } catch {
-        // Directory doesn't exist or empty
-      }
-
-      if (deletedCount === 0) {
-        log.info("  ℹ️  No state to delete (already clean)");
-      } else {
-        log.success(`✅ Hard reset complete: ${deletedCount} items deleted`);
-      }
-
-      return true;
-    } catch (error) {
-      log.error(`❌ Hard reset failed: ${error}`);
-      return false;
-    }
-  }
 }

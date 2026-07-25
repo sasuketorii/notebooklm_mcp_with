@@ -1,6 +1,6 @@
 # Usage Guide
 
-Practical end-to-end walkthroughs for custom version 0.0.1. Each section is a self-contained recipe with the exact tool calls / curl commands. The upstream base is recorded in `RELEASE_PROVENANCE.json`.
+Practical end-to-end walkthroughs for custom version 0.0.2. Each section is a self-contained recipe with the exact tool calls / curl commands. The upstream base is recorded in `RELEASE_PROVENANCE.json`.
 
 - [First-time setup](#first-time-setup)
 - [Multi-turn session pattern](#multi-turn-session-pattern)
@@ -39,7 +39,11 @@ Verify:
 { "name": "get_health", "arguments": {} }
 ```
 
-Expect `"authenticated": true`.
+Immediately after setup, expect `auth_status: "snapshot_usable"` when the
+saved state contains unexpired persistent-cookie evidence. After a successful
+NotebookLM operation in the same process, expect `runtime_verified`.
+`authenticated=true` is evidence, not a guarantee that Google will accept the
+next request.
 
 ### 3. Add a notebook to the local library
 

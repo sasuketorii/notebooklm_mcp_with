@@ -11,15 +11,17 @@ export const systemTools: Tool[] = [
     name: "get_health",
     description:
       "Inspect server state. Returns:\n" +
-      "  • `authenticated` — whether saved Google cookies are still valid\n" +
+      "  • `authenticated`, `auth_status`, `auth_evidence` — live runtime verification or conservative recovery-snapshot evidence\n" +
       "  • `notebook_url`, `active_notebook_id`, `active_notebook_name` —\n" +
       "    the currently selected library notebook (or null)\n" +
       "  • `total_notebooks` — library size\n" +
       "  • `active_sessions`, `max_sessions`, `session_timeout` — runtime\n" +
       "    session stats (timeout in seconds; sessions auto-close after this)\n" +
       "  • `headless`, `auto_login_enabled`, `stealth_enabled` — config\n" +
-      "Use this first thing in a new conversation. If `authenticated=false`, " +
-      "run `setup_auth` (or `re_auth` to switch accounts).",
+      "Use this first thing in a new conversation. `authenticated=true` means either " +
+      "this process completed a live NotebookLM readiness check or the recovery snapshot " +
+      "contains unexpired persistent-cookie evidence; it is not proof that Google currently " +
+      "accepts saved cookies. This check does not open a browser or contact Google.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -36,17 +38,13 @@ export const systemTools: Tool[] = [
       "Open a browser window for first-time Google login. The call waits while " +
       "the user completes sign-in, for up to 10 minutes, and then cookies are " +
       "persisted for future runs. This preserves any " +
-      "existing saved profile/state; use `re_auth` when a destructive account " +
-      "reset is intended.\n\n" +
+      "existing persistent profile/state. A conflicting owner returns `profile_busy`.\n\n" +
       "When to use:\n" +
-      "  • `get_health` reports `authenticated=false` for the first time\n" +
+      "  • `get_health` reports `snapshot_missing`, `snapshot_expired`, or `snapshot_malformed`\n" +
       "  • Auto-login credentials are not configured\n" +
-      "  • `re_auth` is the right call when you want to *switch* accounts " +
-      "or recover from a daily-quota lockout\n\n" +
+      "  • Use a distinct account data directory to switch accounts\n\n" +
       "After login finishes, call `get_health` to verify success.\n\n" +
-      "If the browser session feels broken (auth keeps failing, stale cookies), " +
-      "run `cleanup_data(confirm=true, preserve_library=true)` first, then " +
-      "retry `setup_auth`.",
+      "If the browser session feels broken, inspect with `cleanup_data(confirm=false, preserve_library=true)` and retry `setup_auth`; destructive cleanup is unavailable.",
     inputSchema: {
       type: "object",
       properties: {
@@ -80,24 +78,19 @@ export const systemTools: Tool[] = [
   {
     name: "re_auth",
     description:
-      "Switch to a different Google account or recover from broken auth. " +
-      "Closes all active sessions, deletes saved cookies and Chrome profile, " +
-      "and opens a fresh login browser.\n\n" +
-      "Common triggers:\n" +
-      "  • NotebookLM's 50 queries/day free-tier limit is reached and the " +
-      "user wants to rotate to another Google account\n" +
-      "  • `setup_auth` failed and a clean slate is needed\n\n" +
-      "After login, call `get_health` to verify. For very stuck states, run " +
-      "`cleanup_data(confirm=true, preserve_library=true)` before `re_auth`.",
+      "Unavailable. This tool always returns `re_auth_unavailable` without launching a browser, changing configuration, rotating accounts, wiping authentication, or touching files.",
     inputSchema: {
       type: "object",
       properties: {
         show_browser: {
           type: "boolean",
-          description: "Show the browser window. Default: true.",
+          description:
+            "Compatibility argument only. Accepted but ignored because re_auth is unavailable.",
         },
         browser_options: {
           type: "object",
+          description:
+            "Compatibility argument only. Accepted but ignored because re_auth is unavailable.",
           properties: {
             show: { type: "boolean" },
             headless: { type: "boolean" },
@@ -107,54 +100,44 @@ export const systemTools: Tool[] = [
       },
     },
     annotations: {
-      title: "Re-authenticate",
-      readOnlyHint: false,
-      destructiveHint: true,
-      idempotentHint: false,
-      openWorldHint: true,
+      title: "Re-authentication unavailable",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
     },
   },
   {
     name: "cleanup_data",
     description:
-      "Two-phase deep cleanup of all server data on disk (auth state, " +
-      "browser profiles, caches, MCP logs, temp backups). Cross-platform " +
-      "(Linux/macOS/Windows). Always close all Chrome/Chromium instances " +
-      "first — open browsers can lock files.\n\n" +
-      "Phase 1 (preview): call with `confirm: false`. Returns a categorised " +
-      "list of paths and total size. **No deletion happens.**\n" +
-      "Phase 2 (delete): after the user reviews the preview and approves, " +
-      "call with `confirm: true`.\n\n" +
-      "Set `preserve_library: true` to keep the notebook library file " +
-      "(library.json) while wiping everything else — recommended when " +
-      "troubleshooting auth.\n\n" +
-      "Typical recovery flow:\n" +
-      "  1. cleanup_data(confirm=false, preserve_library=true)  // preview\n" +
-      "  2. cleanup_data(confirm=true, preserve_library=true)   // execute\n" +
-      "  3. setup_auth (or re_auth)",
+      "Inspect server data paths that would require manual cleanup (auth state, " +
+      "browser profiles, caches, MCP logs, temp backups). This tool is " +
+      "strictly non-mutating and never deletes files.\n\n" +
+      "Call with `confirm: false` for a categorised non-mutating preview. " +
+      "`confirm: true` returns `cleanup_unavailable` and performs no deletion.\n\n" +
+      "`preserve_library=true` filters library-related paths out of the hypothetical preview. " +
+      "It never causes deletion.\n\n" +
+      "Typical recovery flow: cleanup_data(confirm=false, preserve_library=true) // preview, then setup_auth if needed",
     inputSchema: {
       type: "object",
       properties: {
         confirm: {
           type: "boolean",
-          description:
-            "false = preview only (default). true = actually delete after " +
-            "user reviewed the preview.",
+          description: "false = preview only (default). true = unsupported with no side effects.",
         },
         preserve_library: {
           type: "boolean",
           description:
-            "Keep notebook library.json while deleting everything else. " +
-            "Default: false. Set true when only auth/browser state is broken.",
+            "Preview filter. true excludes library-related paths from the hypothetical cleanup list. No files are deleted.",
           default: false,
         },
       },
       required: ["confirm"],
     },
     annotations: {
-      title: "Cleanup all data",
-      readOnlyHint: false,
-      destructiveHint: true,
+      title: "Preview cleanup paths",
+      readOnlyHint: true,
+      destructiveHint: false,
       idempotentHint: true,
       openWorldHint: false,
     },

@@ -444,4 +444,9 @@ export class SessionManager {
       total_messages: totalMessages,
     };
   }
+
+  /** Offline health uses this cached live-readiness fact; it never creates a browser. */
+  isRuntimeVerified(): boolean {
+    return this.sharedContextManager.isRuntimeVerified();
+  }
 }

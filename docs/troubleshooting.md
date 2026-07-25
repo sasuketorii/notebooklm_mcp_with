@@ -1,6 +1,6 @@
 # Troubleshooting
 
-A symptom → fix matrix for custom version 0.0.1. For the full env-var inventory, see [`configuration.md`](./configuration.md). The upstream base is recorded in `RELEASE_PROVENANCE.json`.
+A symptom → fix matrix for custom version 0.0.2. For the full env-var inventory, see [`configuration.md`](./configuration.md). The upstream base is recorded in `RELEASE_PROVENANCE.json`.
 
 ## Chrome fails to launch (macOS Tahoe / Windows exit 21)
 
@@ -34,7 +34,9 @@ Checks:
    { "name": "ask_question", "arguments": { "question": "...", "show_browser": true } }
    ```
    Or start the server with `HEADLESS=false`.
-3. Check `get_health` — if `authenticated=false`, the page is on the login screen, not the notebook.
+3. Check `get_health`. `runtime_verified` means this process reached a ready
+   NotebookLM page. Snapshot statuses are offline evidence only and do not
+   inspect the current page.
 
 ## Session expired / repeated login prompts
 
@@ -43,12 +45,12 @@ Symptom: NotebookLM keeps redirecting to the login screen, or `get_health` repor
 Workflow:
 
 1. Close every Chrome / Chromium instance the user has open. An open Chrome can hold the persistent profile lock.
-2. `re_auth` to wipe stored auth and prompt for a fresh login.
-3. If `re_auth` fails repeatedly, run `cleanup_data` with the library preserved:
+2. Run `setup_auth` to authenticate the persistent profile again.
+3. Inspect storage with `cleanup_data` (it is preview-only):
    ```json
    { "name": "cleanup_data", "arguments": { "confirm": false, "preserve_library": true } }
    ```
-   Review the preview, then run again with `confirm: true`. Then `setup_auth`.
+   Then retry `setup_auth`; `re_auth` does not rotate or wipe accounts.
 
 ## WSL1
 
@@ -95,14 +97,21 @@ Symptom: Chrome processes survive after the MCP server exits.
 v2 ships a 5-second shutdown watchdog and an aggressive teardown path, so this is rare. If it does happen:
 
 1. Kill the lingering Chromes manually.
-2. Run `cleanup_data` with `preserve_library: true` to remove stale profile locks.
-3. Restart the server.
+2. Run `cleanup_data` with `confirm: false` to preview relevant paths. It never
+   removes locks or other files.
+3. Verify no live Chrome owns the profile, remove a confirmed stale marker
+   manually if necessary, then restart the server.
 
 ## Profile lock / `ProcessSingleton` errors
 
 Cause: Another Chrome owns the base profile.
 
-Fix: The default `NOTEBOOK_PROFILE_STRATEGY=auto` falls back to an isolated per-instance profile. To force isolation always:
+The server does not reject setup merely because a `Singleton*` path exists:
+Chrome is launched first and only a matching launch error is classified as a
+live profile conflict. This avoids false `profile_busy` results from stale
+marker files.
+
+Fix: The default `NOTEBOOK_PROFILE_STRATEGY=auto` falls back to an isolated per-instance profile only when a bootstrap-eligible recovery snapshot exists. `single` returns `profile_busy`; explicit `isolated` also requires that snapshot. To request isolation:
 
 ```bash
 NOTEBOOK_PROFILE_STRATEGY=isolated ./scripts/mcp-launcher.sh
@@ -114,7 +123,7 @@ Symptom: `NotebookLM rate limit reached (50 queries/day for free accounts)`.
 
 Options:
 
-- Use `re_auth` to switch to a different Google account.
+- Use a distinct account data directory for a different Google account.
 - Use multi-account mode for a clean separation:
   ```bash
   NOTEBOOKLM_ACCOUNT=backup ./scripts/mcp-launcher.sh

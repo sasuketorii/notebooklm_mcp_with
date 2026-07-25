@@ -72,8 +72,8 @@ The default flow is interactive — `setup_auth` opens a browser and the user si
 
 | Variable | Type | Default | Purpose |
 |---|---|---|---|
-| `NOTEBOOK_PROFILE_STRATEGY` | enum | `auto` | `auto` (isolate when base is locked), `single` (always base), `isolated` (always per-instance). |
-| `NOTEBOOK_CLONE_PROFILE` | bool | `false` | Clone the base profile into the isolated dir on first use. |
+| `NOTEBOOK_PROFILE_STRATEGY` | enum | `auto` | `auto` uses an isolated profile only when the base is busy **and** a bootstrap-eligible snapshot exists; `single` returns `profile_busy`; `isolated` also requires that snapshot. |
+| `NOTEBOOK_CLONE_PROFILE` | bool | `false` | Deprecated and ignored. Isolated profiles are never cloned from a live base profile. |
 | `NOTEBOOK_CLEANUP_ON_STARTUP` | bool | `true` | Clean stale isolated profiles on boot. |
 | `NOTEBOOK_CLEANUP_ON_SHUTDOWN` | bool | `true` | Clean isolated profiles on graceful shutdown. |
 | `NOTEBOOK_INSTANCE_TTL_HOURS` | int | `72` | Max age for an isolated profile dir. |
@@ -140,7 +140,9 @@ These set the description used for the legacy fallback when no notebook is activ
 
 ## Per-call browser options
 
-`ask_question`, `setup_auth`, and `re_auth` accept a `browser_options` object. Shape:
+`ask_question` and `setup_auth` implement a `browser_options` object. `re_auth`
+accepts the same input fields for compatibility but ignores them and always returns
+`re_auth_unavailable` without launching a browser. Shape:
 
 ```jsonc
 {
@@ -161,4 +163,4 @@ These set the description used for the legacy fallback when no notebook is activ
 }
 ```
 
-`show_browser` is available on `ask_question`, `setup_auth`, `re_auth`, `add_source`, `add_audio_source`, `generate_audio`, `get_audio_status`, `download_audio`, `add_youtube_source`, `wait_for_source_ready`, and `export_transcript`. The richer `browser_options` object is implemented on `ask_question`, `setup_auth`, and `re_auth`; source/audio tools accept the visibility shorthand only. For the three tools supporting both, `browser_options` takes precedence over the shorthand.
+`show_browser` is available on `ask_question`, `setup_auth`, `add_source`, `add_audio_source`, `generate_audio`, `get_audio_status`, `download_audio`, `add_youtube_source`, `wait_for_source_ready`, and `export_transcript`. The richer `browser_options` object is implemented on `ask_question` and `setup_auth`; source/audio tools accept the visibility shorthand only. For those two tools, `browser_options` takes precedence over the shorthand. `re_auth` accepts but ignores both compatibility fields because it is unavailable.

@@ -28,6 +28,8 @@ import { writeTranscript } from "../notebooklm/transcript-export.js";
 import type { AddYouTubeSourceResult } from "../notebooklm/youtube-source.js";
 import type { SourceReadinessResult } from "../notebooklm/source-readiness.js";
 import type { TranscriptResult, WriteReceipt } from "../notebooklm/transcript-export.js";
+import type { BaseProfileLeaseHandle } from "../auth/auth-persistence.js";
+import { classifyAuthHealth, type AuthStatus } from "../auth/auth-persistence.js";
 
 // CONFIG is process-global and the HTTP transport deliberately shares one core
 // across clients. Calls that need legacy per-call CONFIG overrides must therefore
@@ -87,13 +89,37 @@ export class ToolHandlers {
   private sessionManager: SessionManager;
   private authManager: AuthManager;
   private library: NotebookLibrary;
+  private createCleanupManager: () => CleanupManager;
 
-  constructor(sessionManager: SessionManager, authManager: AuthManager, library: NotebookLibrary) {
+  constructor(
+    sessionManager: SessionManager,
+    authManager: AuthManager,
+    library: NotebookLibrary,
+    options: { cleanupManagerFactory?: () => CleanupManager } = {}
+  ) {
     this.sessionManager = sessionManager;
     this.authManager = authManager;
     this.library = library;
+    this.createCleanupManager = options.cleanupManagerFactory ?? (() => new CleanupManager());
   }
 
+  // Small deterministic test doubles from older callers predate the durable
+  // lease API. Production AuthManager always implements these methods.
+  private async acquireAuthLease(
+    mode: "setup_auth" | "re_auth"
+  ): Promise<BaseProfileLeaseHandle | { release: () => Promise<void> } | null> {
+    const manager = this.authManager as AuthManager & {
+      acquireBaseProfileLease?: (
+        m: "setup_auth" | "re_auth"
+      ) => Promise<BaseProfileLeaseHandle | null>;
+    };
+    return manager.acquireBaseProfileLease
+      ? manager.acquireBaseProfileLease(mode)
+      : { release: async () => undefined };
+  }
+  private async releaseAuthLease(lease: { release: () => Promise<void> }): Promise<void> {
+    await lease.release();
+  }
   /**
    * Handle ask_question tool
    */
@@ -235,9 +261,8 @@ export class ToolHandlers {
           error:
             "NotebookLM rate limit reached (50 queries/day for free accounts).\n\n" +
             "You can:\n" +
-            "1. Use the 're_auth' tool to login with a different Google account\n" +
-            "2. Wait until tomorrow for the quota to reset\n" +
-            "3. Upgrade to Google AI Pro/Ultra for 5x higher limits\n\n" +
+            "1. Wait until tomorrow for the quota to reset\n" +
+            "2. Upgrade to Google AI Pro/Ultra for 5x higher limits\n\n" +
             `Original error: ${errorMessage}`,
         };
       }
@@ -402,6 +427,8 @@ export class ToolHandlers {
     ToolResult<{
       status: string;
       authenticated: boolean;
+      auth_status: AuthStatus;
+      auth_evidence: string;
       notebook_url: string;
       active_notebook_id: string | null;
       active_notebook_name: string | null;
@@ -419,9 +446,14 @@ export class ToolHandlers {
     log.info(`🔧 [TOOL] get_health called`);
 
     try {
-      // Check authentication status
-      const statePath = await this.authManager.getValidStatePath();
-      const authenticated = statePath !== null;
+      // Health is deliberately offline: it must not launch a browser, take a
+      // profile lease, navigate, or touch a Chrome profile database.
+      const snapshot = await this.authManager.inspectSnapshot();
+      const runtimeVerified = this.sessionManager.isRuntimeVerified();
+      const { authenticated, auth_status, auth_evidence } = classifyAuthHealth(
+        snapshot,
+        runtimeVerified
+      );
 
       // Get session stats
       const stats = this.sessionManager.getStats();
@@ -434,6 +466,8 @@ export class ToolHandlers {
       const result = {
         status: "ok",
         authenticated,
+        auth_status,
+        auth_evidence,
         notebook_url: notebookUrl,
         active_notebook_id: active?.id ?? null,
         active_notebook_name: active?.name ?? null,
@@ -448,8 +482,7 @@ export class ToolHandlers {
         // Add troubleshooting tip if not authenticated
         ...(!authenticated && {
           troubleshooting_tip:
-            "For fresh start with clean browser session: Close all Chrome instances → " +
-            "cleanup_data(confirm=true, preserve_library=true) → setup_auth",
+            "Existing authentication was not modified. Use setup_auth only when you explicitly need a new login; cleanup_data is preview-only.",
         }),
       };
 
@@ -502,39 +535,45 @@ export class ToolHandlers {
 
     try {
       return await withTemporaryBrowserConfig(browser_options, show_browser, async () => {
-        // Progress: Starting
-        await sendProgress?.("Preparing authentication browser...", 1, 10);
+        const lease = await this.acquireAuthLease("setup_auth");
+        if (!lease) return { success: false, error: "profile_busy" };
+        try {
+          // Progress: Starting
+          await sendProgress?.("Preparing authentication browser...", 1, 10);
 
-        log.info(`  🌐 Opening browser for interactive login...`);
+          log.info(`  🌐 Opening browser for interactive login...`);
 
-        // Progress: Opening browser
-        await sendProgress?.("Opening browser window...", 2, 10);
+          // Progress: Opening browser
+          await sendProgress?.("Opening browser window...", 2, 10);
 
-        // Perform setup with progress updates (uses CONFIG internally)
-        const success = await this.authManager.performSetup(sendProgress);
+          // Perform setup with progress updates (uses CONFIG internally)
+          const success = await this.authManager.performSetup(sendProgress, show_browser);
 
-        const durationSeconds = (Date.now() - startTime) / 1000;
+          const durationSeconds = (Date.now() - startTime) / 1000;
 
-        if (success) {
-          // Progress: Complete
-          await sendProgress?.("Authentication saved successfully!", 10, 10);
+          if (success) {
+            // Progress: Complete
+            await sendProgress?.("Authentication saved successfully!", 10, 10);
 
-          log.success(`✅ [TOOL] setup_auth completed (${durationSeconds.toFixed(1)}s)`);
-          return {
-            success: true,
-            data: {
-              status: "authenticated",
-              message: "Successfully authenticated and saved browser state",
-              authenticated: true,
-              duration_seconds: durationSeconds,
-            },
-          };
-        } else {
-          log.error(`❌ [TOOL] setup_auth failed (${durationSeconds.toFixed(1)}s)`);
-          return {
-            success: false,
-            error: "Authentication failed or was cancelled",
-          };
+            log.success(`✅ [TOOL] setup_auth completed (${durationSeconds.toFixed(1)}s)`);
+            return {
+              success: true,
+              data: {
+                status: "authenticated",
+                message: "Successfully authenticated and saved browser state",
+                authenticated: true,
+                duration_seconds: durationSeconds,
+              },
+            };
+          } else {
+            log.error(`❌ [TOOL] setup_auth failed (${durationSeconds.toFixed(1)}s)`);
+            return {
+              success: false,
+              error: "Authentication failed or was cancelled",
+            };
+          }
+        } finally {
+          await this.releaseAuthLease(lease);
         }
       });
     } catch (error) {
@@ -549,90 +588,21 @@ export class ToolHandlers {
   }
 
   /**
-   * Handle re_auth tool
-   *
-   * Performs a complete re-authentication:
-   * 1. Closes all active browser sessions
-   * 2. Deletes all saved authentication data (cookies, Chrome profile)
-   * 3. Opens browser for fresh Google login
-   *
-   * Use for switching Google accounts or recovering from rate limits.
+   * Compatibility endpoint. It is deliberately unavailable and has no side
+   * effects until staged profile switching can preserve the current account.
    */
   async handleReAuth(
-    args: {
+    _args: {
       show_browser?: boolean;
       browser_options?: BrowserOptions;
     },
-    sendProgress?: ProgressCallback
-  ): Promise<
-    ToolResult<{
-      status: string;
-      message: string;
-      authenticated: boolean;
-      duration_seconds?: number;
-    }>
-  > {
-    const { show_browser, browser_options } = args;
-
-    await sendProgress?.("Preparing re-authentication...", 0, 12);
-    log.info(`🔧 [TOOL] re_auth called`);
-    if (show_browser !== undefined) {
-      log.info(`  Show browser: ${show_browser}`);
-    }
-
-    const startTime = Date.now();
-
-    try {
-      return await withTemporaryBrowserConfig(browser_options, show_browser, async () => {
-        // 1. Close all active sessions
-        await sendProgress?.("Closing all active sessions...", 1, 12);
-        log.info("  🛑 Closing all sessions...");
-        await this.sessionManager.closeAllSessions();
-        log.success("  ✅ All sessions closed");
-
-        // 2. Clear all auth data
-        await sendProgress?.("Clearing authentication data...", 2, 12);
-        log.info("  🗑️  Clearing all auth data...");
-        await this.authManager.clearAllAuthData();
-        log.success("  ✅ Auth data cleared");
-
-        // 3. Perform fresh setup
-        await sendProgress?.("Starting fresh authentication...", 3, 12);
-        log.info("  🌐 Starting fresh authentication setup...");
-        const success = await this.authManager.performSetup(sendProgress);
-
-        const durationSeconds = (Date.now() - startTime) / 1000;
-
-        if (success) {
-          await sendProgress?.("Re-authentication complete!", 12, 12);
-          log.success(`✅ [TOOL] re_auth completed (${durationSeconds.toFixed(1)}s)`);
-          return {
-            success: true,
-            data: {
-              status: "authenticated",
-              message:
-                "Successfully re-authenticated with new account. All previous sessions have been closed.",
-              authenticated: true,
-              duration_seconds: durationSeconds,
-            },
-          };
-        } else {
-          log.error(`❌ [TOOL] re_auth failed (${durationSeconds.toFixed(1)}s)`);
-          return {
-            success: false,
-            error: "Re-authentication failed or was cancelled",
-          };
-        }
-      });
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const durationSeconds = (Date.now() - startTime) / 1000;
-      log.error(`❌ [TOOL] re_auth failed: ${errorMessage} (${durationSeconds.toFixed(1)}s)`);
-      return {
-        success: false,
-        error: errorMessage,
-      };
-    }
+    _sendProgress?: ProgressCallback
+  ): Promise<ToolResult<never>> {
+    return {
+      success: false,
+      error:
+        "re_auth_unavailable: account rotation and authentication wiping are unsupported; existing authentication was not touched",
+    };
   }
 
   /**
@@ -862,9 +832,7 @@ export class ToolHandlers {
   }
 
   /**
-   * Handle cleanup_data tool
-   *
-   * ULTRATHINK Deep Cleanup - scans entire system for ALL NotebookLM MCP files
+   * Return a read-only cleanup preview. Deletion is deliberately unavailable.
    */
   async handleCleanupData(args: { confirm: boolean; preserve_library?: boolean }): Promise<
     ToolResult<{
@@ -881,27 +849,22 @@ export class ToolHandlers {
         totalPaths: number;
         totalSizeBytes: number;
       };
-      result?: {
-        deletedPaths: string[];
-        failedPaths: string[];
-        totalSizeBytes: number;
-        categorySummary: Record<string, { count: number; bytes: number }>;
-      };
     }>
   > {
+    if (args.confirm) return { success: false, error: "cleanup_unavailable: preview-only" };
     const { confirm, preserve_library = false } = args;
 
     log.info(`🔧 [TOOL] cleanup_data called`);
     log.info(`  Confirm: ${confirm}`);
     log.info(`  Preserve Library: ${preserve_library}`);
 
-    const cleanupManager = new CleanupManager();
+    const cleanupManager = this.createCleanupManager();
 
     try {
       // Always run in deep mode
       const mode = "deep";
 
-      if (!confirm) {
+      {
         // Preview mode - show what would be deleted
         log.info(`  📋 Generating cleanup preview (mode: ${mode})...`);
 
@@ -922,33 +885,6 @@ export class ToolHandlers {
               categories: preview.categories,
               totalPaths: preview.totalPaths.length,
               totalSizeBytes: preview.totalSizeBytes,
-            },
-          },
-        };
-      } else {
-        // Cleanup mode - actually delete files
-        log.info(`  🗑️  Performing cleanup (mode: ${mode})...`);
-
-        const result = await cleanupManager.performCleanup(mode, preserve_library);
-
-        if (result.success) {
-          log.success(
-            `✅ [TOOL] cleanup_data completed - deleted ${result.deletedPaths.length} items`
-          );
-        } else {
-          log.warning(`⚠️  [TOOL] cleanup_data completed with ${result.failedPaths.length} errors`);
-        }
-
-        return {
-          success: result.success,
-          data: {
-            status: result.success ? "completed" : "partial",
-            mode,
-            result: {
-              deletedPaths: result.deletedPaths,
-              failedPaths: result.failedPaths,
-              totalSizeBytes: result.totalSizeBytes,
-              categorySummary: result.categorySummary,
             },
           },
         };

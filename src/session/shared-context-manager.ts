@@ -19,11 +19,36 @@ import { log } from "../utils/logger.js";
 import type { AuthManager } from "../auth/auth-manager.js";
 import {
   getPreferredChannel,
+  isProfileLockError,
   isChannelFailure,
   withChannel,
 } from "../browser/chromium-fallback.js";
 import fs from "fs";
 import path from "path";
+import { randomBytes } from "crypto";
+import type { BaseProfileLeaseHandle } from "../auth/auth-persistence.js";
+
+export type ProfileModeDecision = "base" | "isolated" | "busy";
+
+/** Pure policy used by runtime and deterministic strategy tests. */
+export function decideProfileMode(
+  strategy: "auto" | "single" | "isolated",
+  baseLeaseAcquired: boolean,
+  snapshotBootstrapEligible: boolean
+): ProfileModeDecision {
+  if (strategy === "isolated") return snapshotBootstrapEligible ? "isolated" : "busy";
+  if (baseLeaseAcquired) return "base";
+  if (strategy === "single") return "busy";
+  return snapshotBootstrapEligible ? "isolated" : "busy";
+}
+
+export function shouldPublishRecoverySnapshot(
+  isolated: boolean,
+  runtimeVerified: boolean,
+  ownsRuntimeLease: boolean
+): boolean {
+  return !isolated && runtimeVerified && ownsRuntimeLease;
+}
 
 /**
  * Shared Context Manager
@@ -41,6 +66,17 @@ export class SharedContextManager {
   private currentProfileDir: string | null = null;
   private isIsolatedProfile: boolean = false;
   private currentHeadlessMode: boolean | null = null;
+  private contextGenerationId: string | null = null;
+  private runtimeVerifiedGeneration: string | null = null;
+  private lastSnapshotPublishAt = 0;
+  private snapshotPublishPromise?: Promise<void>;
+  private baseLease?: BaseProfileLeaseHandle;
+  private teardown:
+    | {
+        generation: string;
+        promise: Promise<void>;
+      }
+    | undefined;
 
   constructor(authManager: AuthManager) {
     this.authManager = authManager;
@@ -68,6 +104,7 @@ export class SharedContextManager {
    * @param overrideHeadless Optional override for headless mode (true = show browser)
    */
   async getOrCreateContext(overrideHeadless?: boolean): Promise<BrowserContext> {
+    await this.awaitTeardown();
     // Check if headless mode needs to be changed (e.g., show_browser=true)
     // If yes, close the browser so it gets recreated with the new mode
     if (this.needsHeadlessModeChange(overrideHeadless)) {
@@ -102,9 +139,8 @@ export class SharedContextManager {
       return false;
     } catch {
       log.warning("  ⚠️  Context appears closed - will recreate");
-      this.globalContext = null;
-      this.contextCreatedAt = null;
-      this.currentHeadlessMode = null;
+      const generation = this.contextGenerationId;
+      if (generation) await this.teardownGeneration(generation, true);
       return true;
     }
   }
@@ -127,26 +163,15 @@ export class SharedContextManager {
    * @param overrideHeadless Optional override for headless mode (true = show browser)
    */
   private async recreateContext(overrideHeadless?: boolean): Promise<void> {
-    // Close old context if exists
-    if (this.globalContext) {
-      try {
-        log.info("  🗑️  Closing old context...");
-        await this.globalContext.close();
-      } catch (error) {
-        log.warning(`  ⚠️  Error closing old context: ${error}`);
-      }
-    }
+    await this.closeContext();
 
-    // Check for saved auth
+    const initialLease =
+      CONFIG.profileStrategy === "isolated"
+        ? null
+        : await this.authManager.acquireBaseProfileLease("runtime");
+    // The base persistent profile is the sole live source of truth.  A
+    // storage snapshot can only bootstrap a disposable isolated context.
     const statePath = await this.authManager.getValidStatePath();
-
-    if (statePath) {
-      log.success(`  📂 Found auth state: ${statePath}`);
-      log.info("  💡 Will load cookies into persistent profile");
-    } else {
-      log.warning("  🆕 No saved auth - fresh persistent profile");
-      log.info("  💡 First login will save auth to persistent profile");
-    }
 
     // Determine headless mode: use override if provided, otherwise use CONFIG
     const shouldBeHeadless = overrideHeadless !== undefined ? !overrideHeadless : CONFIG.headless;
@@ -162,13 +187,8 @@ export class SharedContextManager {
       viewport: CONFIG.viewport,
       locale: "en-US",
       timezoneId: "Europe/Berlin",
-      // ✅ CRITICAL FIX: Pass storageState directly at launch!
-      // This is the PROPER way to handle session cookies (Playwright bug workaround)
-      // Benefits:
-      // - Session cookies persist correctly
-      // - No need for addCookies() workarounds
-      // - Chrome loads everything automatically
-      ...(statePath && { storageState: statePath }),
+      // The authoritative base profile is launched without storageState.
+      // Only a fresh isolated profile receives the recovery snapshot below.
       args: [
         "--disable-blink-features=AutomationControlled",
         "--disable-dev-shm-usage",
@@ -188,22 +208,34 @@ export class SharedContextManager {
     const tryLaunch = async (userDataDir: string) => {
       log.info("  🚀 Launching persistent Chrome context...");
       log.dim(`  📍 Profile location: ${userDataDir}`);
-      if (statePath) {
-        log.info(`  📄 Loading auth state: ${statePath}`);
-      }
+      if (userDataDir !== baseProfile && statePath)
+        log.info("  📄 Bootstrapping isolated profile from recovery snapshot");
       try {
         return await chromium.launchPersistentContext(
           userDataDir,
-          withChannel(baseLaunchOptions, preferred)
+          withChannel(
+            {
+              ...baseLaunchOptions,
+              ...(userDataDir !== baseProfile && statePath ? { storageState: statePath } : {}),
+            },
+            preferred
+          )
         );
       } catch (err) {
+        if (isProfileLockError(err)) throw err;
         if (preferred === "chrome" && isChannelFailure(err)) {
           log.warning(
             "⚠️  System Chrome failed to launch — falling back to bundled Chromium (set BROWSER_CHANNEL=chromium to skip this retry)."
           );
           return await chromium.launchPersistentContext(
             userDataDir,
-            withChannel(baseLaunchOptions, "chromium")
+            withChannel(
+              {
+                ...baseLaunchOptions,
+                ...(userDataDir !== baseProfile && statePath ? { storageState: statePath } : {}),
+              },
+              "chromium"
+            )
           );
         }
         throw err;
@@ -211,27 +243,36 @@ export class SharedContextManager {
     };
 
     try {
-      if (strategy === "isolated") {
-        const isolatedDir = await this.prepareIsolatedProfileDir(baseProfile);
+      const decision = decideProfileMode(strategy, !!initialLease, !!statePath);
+      if (decision === "busy")
+        throw new Error("profile_busy: isolated runtime requires a bootstrap-eligible snapshot");
+      if (decision === "isolated") {
+        const isolatedDir = await this.prepareIsolatedProfileDir();
         this.globalContext = await tryLaunch(isolatedDir);
         this.currentProfileDir = isolatedDir;
         this.isIsolatedProfile = true;
       } else {
-        // single or auto → first try base
+        if (!initialLease) throw new Error("profile_busy");
+        // We hold the base lease for the entire context lifetime.
         this.globalContext = await tryLaunch(baseProfile);
+        this.baseLease = initialLease;
+        const generationLease = initialLease;
+        // The generation id is assigned below. The callback reads it only
+        // after launch has completed and the heartbeat can run.
+        initialLease.onLost(async () => {
+          this.invalidateRuntimeVerification();
+          const generation = this.contextGenerationId;
+          if (this.baseLease === generationLease && generation)
+            await this.teardownGeneration(generation, true);
+        });
         this.currentProfileDir = baseProfile;
         this.isIsolatedProfile = false;
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      const isSingleton = /ProcessSingleton|SingletonLock|profile is already in use/i.test(msg);
-      if (strategy === "single" || !isSingleton) {
+      const isSingleton = isProfileLockError(e);
+      if (!isSingleton || strategy === "isolated") {
+        await initialLease?.release();
         // hard fail
-        if (isSingleton && strategy === "single") {
-          log.error(
-            "❌ Chrome profile already in use and strategy=single. Close other instance or set NOTEBOOK_PROFILE_STRATEGY=auto/isolated."
-          );
-        }
         throw e;
       }
 
@@ -239,38 +280,18 @@ export class SharedContextManager {
       log.warning(
         "⚠️  Base Chrome profile in use by another process. Falling back to isolated per-instance profile..."
       );
-      const isolatedDir = await this.prepareIsolatedProfileDir(baseProfile);
+      await initialLease?.release();
+      if (strategy === "single" || !statePath) throw new Error("profile_busy", { cause: e });
+      const isolatedDir = await this.prepareIsolatedProfileDir();
       this.globalContext = await tryLaunch(isolatedDir);
       this.currentProfileDir = isolatedDir;
       this.isIsolatedProfile = true;
     }
     this.contextCreatedAt = Date.now();
+    this.contextGenerationId = randomBytes(16).toString("hex");
+    this.runtimeVerifiedGeneration = null;
     this.currentHeadlessMode = shouldBeHeadless;
-    // Track close event to force recreation next time
-    try {
-      this.globalContext.on("close", () => {
-        log.warning("  🛑 Persistent context was closed externally");
-        this.globalContext = null;
-        this.contextCreatedAt = null;
-        this.currentHeadlessMode = null;
-      });
-    } catch {
-      /* close listener is optional — patchright versions differ */
-    }
-
-    // Validate cookies if we loaded state
-    if (statePath) {
-      try {
-        if (await this.authManager.validateCookiesExpiry(this.globalContext)) {
-          log.success("  ✅ Authentication state loaded successfully");
-          log.success("  🎯 Session cookies persisted correctly!");
-        } else {
-          log.warning("  ⚠️  Cookies expired - will need re-login");
-        }
-      } catch (error) {
-        log.warning(`  ⚠️  Could not validate auth state: ${error}`);
-      }
-    }
+    this.attachCloseListener(this.globalContext, this.contextGenerationId);
 
     log.success("✅ Persistent context ready!");
     log.dim(`  Context ID: ${this.getContextId()}`);
@@ -285,60 +306,96 @@ export class SharedContextManager {
    * Chrome will save everything to user_data_dir automatically.
    */
   async closeContext(): Promise<void> {
-    if (this.globalContext) {
-      log.warning("🛑 Closing persistent context...");
-      log.info("  💾 Chrome is saving profile to disk...");
-      try {
-        await this.globalContext.close();
-        this.globalContext = null;
-        this.contextCreatedAt = null;
-        this.currentHeadlessMode = null;
-        log.success("✅ Persistent context closed");
-        log.success(`  💾 Profile saved: ${this.currentProfileDir || CONFIG.chromeProfileDir}`);
-      } catch (error) {
-        log.error(`❌ Error closing context: ${error}`);
-      }
+    const generation = this.contextGenerationId;
+    if (generation) {
+      await this.teardownGeneration(generation, true);
+      return;
     }
+    await this.awaitTeardown();
+  }
 
-    // Best-effort cleanup on shutdown
-    if (CONFIG.cleanupInstancesOnShutdown) {
-      try {
-        // If this process used an isolated profile, remove it now
-        if (this.isIsolatedProfile && this.currentProfileDir) {
-          await this.safeRemoveIsolatedProfile(this.currentProfileDir);
+  /**
+   * Every termination signal for one context generation converges here.
+   * Clearing the public fields happens before the asynchronous close/release,
+   * while getOrCreateContext waits for the retained promise before relaunching.
+   */
+  private teardownGeneration(generation: string, closeBrowser: boolean): Promise<void> {
+    if (this.teardown?.generation === generation) return this.teardown.promise;
+    if (this.contextGenerationId !== generation) return Promise.resolve();
+
+    const context = this.globalContext;
+    const lease = this.baseLease;
+    const profileDir = this.currentProfileDir;
+    const isolated = this.isIsolatedProfile;
+
+    this.globalContext = null;
+    this.contextCreatedAt = null;
+    this.currentHeadlessMode = null;
+    this.contextGenerationId = null;
+    this.runtimeVerifiedGeneration = null;
+    this.baseLease = undefined;
+    this.currentProfileDir = null;
+    this.isIsolatedProfile = false;
+
+    // Start in a microtask so the retained record exists before context.close()
+    // can synchronously emit "close" and re-enter this method.
+    const promise = Promise.resolve()
+      .then(async () => {
+        if (closeBrowser && context) {
+          log.warning("🛑 Closing persistent context...");
+          try {
+            await context.close();
+            log.success("✅ Persistent context closed");
+          } catch (error) {
+            // Lease release remains mandatory even if Patchright close throws.
+            log.warning(`⚠️  Browser close failed during teardown: ${error}`);
+          }
         }
-      } catch (err) {
-        log.warning(`  ⚠️  Cleanup (self) failed: ${err}`);
-      }
-      try {
-        await this.pruneIsolatedProfiles("shutdown");
-      } catch (err) {
-        log.warning(`  ⚠️  Cleanup (prune) failed: ${err}`);
-      }
+        await lease?.release();
+        if (CONFIG.cleanupInstancesOnShutdown && isolated && profileDir) {
+          await this.safeRemoveIsolatedProfile(profileDir).catch((error) => {
+            log.warning(`  ⚠️  Cleanup (self) failed: ${error}`);
+          });
+        }
+        if (CONFIG.cleanupInstancesOnShutdown) {
+          await this.pruneIsolatedProfiles("shutdown").catch((error) => {
+            log.warning(`  ⚠️  Cleanup (prune) failed: ${error}`);
+          });
+        }
+      })
+      .finally(() => {
+        if (this.teardown?.generation === generation) this.teardown = undefined;
+      });
+    this.teardown = { generation, promise };
+    return promise;
+  }
+
+  private async awaitTeardown(): Promise<void> {
+    while (this.teardown) await this.teardown.promise;
+  }
+
+  private attachCloseListener(context: BrowserContext, generation: string): void {
+    try {
+      context.on("close", () => {
+        log.warning("  🛑 Persistent context was closed externally");
+        const teardown = this.teardownGeneration(generation, false);
+        // Retain and observe the promise even though EventEmitter cannot await
+        // listeners; callers entering afterwards await the same promise.
+        teardown.catch((error) => log.warning(`  ⚠️  External close teardown failed: ${error}`));
+      });
+    } catch {
+      /* close listener is optional — patchright versions differ */
     }
   }
 
-  private async prepareIsolatedProfileDir(baseProfile: string): Promise<string> {
+  private async prepareIsolatedProfileDir(): Promise<string> {
     const stamp = `${process.pid}-${Date.now()}`;
     const dir = path.join(CONFIG.chromeInstancesDir, `instance-${stamp}`);
     try {
       fs.mkdirSync(dir, { recursive: true });
-      if (CONFIG.cloneProfileOnIsolated && fs.existsSync(baseProfile)) {
-        log.info("  🧬 Cloning base Chrome profile into isolated instance (may take time)...");
-        // Best-effort clone without locks
-        await fs.promises.cp(baseProfile, dir, {
-          recursive: true,
-          errorOnExist: false,
-          force: true,
-          filter: (src: string) => {
-            const bn = path.basename(src);
-            return !/^Singleton/i.test(bn) && !bn.endsWith(".lock") && !bn.endsWith(".tmp");
-          },
-        });
-        log.success("  ✅ Clone complete");
-      } else {
-        log.info("  🧪 Using fresh isolated Chrome profile (no clone)");
-      }
+      // Never clone the base profile: it may be mutating and contains locks.
+      // Auth recovery for an isolated process is limited to storageState above.
+      log.info("  🧪 Using fresh isolated Chrome profile (no clone)");
     } catch (err) {
       log.warning(`  ⚠️  Could not prepare isolated profile: ${err}`);
     }
@@ -462,6 +519,54 @@ export class SharedContextManager {
    */
   getCurrentHeadlessMode(): boolean | null {
     return this.currentHeadlessMode;
+  }
+
+  /** Called only after a live NotebookLM readiness check succeeds. */
+  async markRuntimeVerified(): Promise<void> {
+    if (
+      !this.globalContext ||
+      !this.contextGenerationId ||
+      (!this.isIsolatedProfile &&
+        (!this.baseLease ||
+          !(await this.authManager.ownsBaseProfileLease(this.baseLease, "runtime"))))
+    )
+      return;
+    this.runtimeVerifiedGeneration = this.contextGenerationId;
+    if (this.isIsolatedProfile) return;
+    if (this.snapshotPublishPromise) return this.snapshotPublishPromise;
+    const generation = this.contextGenerationId;
+    this.snapshotPublishPromise = (async () => {
+      const lease = this.baseLease;
+      const context = this.globalContext;
+      if (!lease || !context || this.contextGenerationId !== generation) return;
+      if (Date.now() - this.lastSnapshotPublishAt < 30_000) return;
+      const ownsRuntimeLease = await this.authManager.ownsBaseProfileLease(lease, "runtime");
+      if (
+        this.contextGenerationId === generation &&
+        shouldPublishRecoverySnapshot(
+          this.isIsolatedProfile,
+          this.isRuntimeVerified(),
+          ownsRuntimeLease
+        ) &&
+        (await this.authManager.saveBrowserState(context))
+      )
+        this.lastSnapshotPublishAt = Date.now();
+    })();
+    try {
+      await this.snapshotPublishPromise;
+    } finally {
+      this.snapshotPublishPromise = undefined;
+    }
+  }
+
+  invalidateRuntimeVerification(): void {
+    this.runtimeVerifiedGeneration = null;
+  }
+
+  isRuntimeVerified(): boolean {
+    return (
+      !!this.contextGenerationId && this.runtimeVerifiedGeneration === this.contextGenerationId
+    );
   }
 
   /**

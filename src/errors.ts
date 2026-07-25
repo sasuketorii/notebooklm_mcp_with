@@ -7,7 +7,6 @@
  *
  * Free users have 50 queries/day limit.
  * This error indicates the user should:
- * - Use re_auth tool to switch Google accounts
  * - Wait until tomorrow for quota reset
  * - Upgrade to Google AI Pro/Ultra for higher limits
  */

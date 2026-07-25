@@ -65,8 +65,9 @@ sources, ingest sources, generate Audio Overviews).
 
 ## First-run flow
 
-1. \`get_health\` → if \`authenticated=false\`, run \`setup_auth\` (opens
-   a browser tab — user logs in once, cookies persist).
+1. \`get_health\` → inspect \`auth_status\` and \`auth_evidence\`. This is
+   offline and does not claim that Google currently accepts a saved cookie.
+   Run \`setup_auth\` when authentication is needed (it opens a browser tab).
 2. \`add_notebook\` to register a NotebookLM share-URL into the local
    library (the user must provide the URL — see add_notebook for the link
    workflow). Optionally \`select_notebook\` to make it the default.
@@ -114,8 +115,8 @@ For synchronous behaviour pass \`wait_for_completion: true\` to
 
 ## Constraints
 
-- Free Google accounts: 50 NotebookLM queries/day. \`re_auth\` rotates
-  accounts.
+- Free Google accounts: 50 NotebookLM queries/day. Account rotation is not
+  supported by this server; use a separate account data directory.
 - Session timeout: ~15 min idle (see \`get_health.session_timeout\`).
 - YouTube sources, readiness polling, and transcript export are supported; Drive and general file uploads are not.
 - Audio Overview is the only Studio output exposed in v2.0; Video,

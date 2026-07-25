@@ -5,9 +5,6 @@
  * system Chrome install. Two failure modes hit users:
  *   - macOS 26 (Tahoe) ships a Chrome binary that crashes on launch in
  *     headless mode (issue #13).
- *   - Windows 11 reports `Chrome exited immediately with exit code 21`
- *     when the persistent profile is locked or the channel binary is
- *     missing (issue #19).
  *
  * Patchright bundles its own Chromium build, which avoids both. We let users
  * pick explicitly via `BROWSER_CHANNEL` / `NOTEBOOKLM_BROWSER_CHANNEL` and
@@ -27,7 +24,6 @@ const CHANNEL_FAILURE_PATTERNS: readonly RegExp[] = [
   /chrome.*exited immediately/i,
   /executable doesn't exist/i,
   /executable.*missing/i,
-  /code 21/i,
   /code -?6/i,
 ];
 
@@ -42,6 +38,17 @@ export function getPreferredChannel(): BrowserChannel {
 export function isChannelFailure(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error);
   return CHANNEL_FAILURE_PATTERNS.some((re) => re.test(msg));
+}
+
+/** Profile ownership errors must win over generic channel wording. */
+export function isProfileLockError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return (
+    /ProcessSingleton|SingletonLock|profile is already in use|user data directory.*in use/i.test(
+      msg
+    ) ||
+    (/code 21/i.test(msg) && /profile|singleton|user data/i.test(msg))
+  );
 }
 
 /**

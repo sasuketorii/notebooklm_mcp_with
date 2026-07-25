@@ -26,15 +26,6 @@ import { log } from "./logger.js";
 
 export type CleanupMode = "legacy" | "all" | "deep";
 
-export interface CleanupResult {
-  success: boolean;
-  mode: CleanupMode;
-  deletedPaths: string[];
-  failedPaths: string[];
-  totalSizeBytes: number;
-  categorySummary: Record<string, { count: number; bytes: number }>;
-}
-
 export interface CleanupCategory {
   name: string;
   description: string;
@@ -634,81 +625,6 @@ export class CleanupManager {
       categories,
       totalPaths: Array.from(allPaths),
       totalSizeBytes,
-    };
-  }
-
-  /**
-   * Perform cleanup with safety checks and detailed reporting
-   */
-  async performCleanup(
-    mode: CleanupMode,
-    preserveLibrary: boolean = false
-  ): Promise<CleanupResult> {
-    log.info(`🧹 Starting cleanup in "${mode}" mode...`);
-    if (preserveLibrary) {
-      log.info(`📚 Library preservation enabled - library.json will be kept!`);
-    }
-
-    const { categories, totalSizeBytes } = await this.getCleanupPaths(mode, preserveLibrary);
-    const deletedPaths: string[] = [];
-    const failedPaths: string[] = [];
-    const categorySummary: Record<string, { count: number; bytes: number }> = {};
-
-    // Delete by category
-    for (const category of categories) {
-      log.info(
-        `\n📦 ${category.name} (${category.paths.length} items, ${this.formatBytes(category.totalBytes)})`
-      );
-
-      if (category.optional) {
-        log.warning(`  ⚠️  Optional category - ${category.description}`);
-      }
-
-      let categoryDeleted = 0;
-      let categoryBytes = 0;
-
-      for (const itemPath of category.paths) {
-        try {
-          if (await this.pathExists(itemPath)) {
-            const size = await this.getDirectorySize(itemPath);
-            log.info(`  🗑️  Deleting: ${itemPath}`);
-            await fs.rm(itemPath, { recursive: true, force: true });
-            deletedPaths.push(itemPath);
-            categoryDeleted++;
-            categoryBytes += size;
-            log.success(`  ✅ Deleted: ${itemPath} (${this.formatBytes(size)})`);
-          }
-        } catch (error) {
-          log.error(`  ❌ Failed to delete: ${itemPath} - ${error}`);
-          failedPaths.push(itemPath);
-        }
-      }
-
-      categorySummary[category.name] = {
-        count: categoryDeleted,
-        bytes: categoryBytes,
-      };
-    }
-
-    const success = failedPaths.length === 0;
-
-    if (success) {
-      log.success(
-        `\n✅ Cleanup complete! Deleted ${deletedPaths.length} items (${this.formatBytes(totalSizeBytes)})`
-      );
-    } else {
-      log.warning(`\n⚠️  Cleanup completed with ${failedPaths.length} errors`);
-      log.success(`  Deleted: ${deletedPaths.length} items`);
-      log.error(`  Failed: ${failedPaths.length} items`);
-    }
-
-    return {
-      success,
-      mode,
-      deletedPaths,
-      failedPaths,
-      totalSizeBytes,
-      categorySummary,
     };
   }
 

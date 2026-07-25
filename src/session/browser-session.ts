@@ -184,29 +184,19 @@ export class BrowserSession {
         log.success(`  ✅ Session already authenticated`);
       }
 
-      // CRITICAL: Restore sessionStorage from saved state
-      // This is essential for maintaining Google session state!
-      log.info(`  🔄 Restoring sessionStorage...`);
-      const sessionData = await this.authManager.loadSessionStorage();
-      if (sessionData) {
-        const entryCount = Object.keys(sessionData).length;
-        if (entryCount > 0) {
-          await this.restoreSessionStorage(sessionData, entryCount);
-        } else {
-          log.info(`  ℹ️  SessionStorage empty (fresh session)`);
-        }
-      } else {
-        log.info(`  ℹ️  No saved sessionStorage found (fresh session)`);
-      }
-
       // Wait for NotebookLM interface to load
       log.info(`  ⏳ Waiting for NotebookLM interface...`);
       await this.waitForNotebookLMReady();
+
+      // This is the live authentication verdict.  Snapshot evidence alone is
+      // never reported as live authentication.
+      await this.sharedContextManager.markRuntimeVerified();
 
       this.initialized = true;
       this.updateActivity();
       log.success(`✅ Session ${this.sessionId} initialized successfully`);
     } catch (error) {
+      this.sharedContextManager.invalidateRuntimeVerification();
       log.error(`❌ Failed to initialize session ${this.sessionId}: ${error}`);
       if (this.page) {
         await this.page.close();
@@ -295,34 +285,13 @@ export class BrowserSession {
 
     log.warning(`  ⚠️  Cookies expired or invalid`);
 
-    // Try to get valid auth state
-    const statePath = await this.authManager.getValidStatePath();
-
-    if (statePath) {
-      // Load saved state
-      log.info(`  📂 Loading auth state from: ${statePath}`);
-      await this.authManager.loadAuthState(this.context, statePath);
-
-      // Reload page to apply new auth
-      log.info(`  🔄 Reloading page...`);
-      await (this.page as Page).reload({ waitUntil: "domcontentloaded" });
-      await randomDelay(2000, 3000);
-
-      // Check if it worked
-      const nowValid = await this.authManager.validateCookiesExpiry(this.context);
-      if (nowValid) {
-        log.success(`  ✅ Auth state loaded successfully`);
-        return true;
-      }
-    }
-
     // Need fresh login
+    this.sharedContextManager.invalidateRuntimeVerification();
     log.warning(`  🔑 Fresh login required`);
 
     if (CONFIG.autoLoginEnabled) {
       log.info(`  🤖 Attempting auto-login...`);
       const loginSuccess = await this.authManager.loginWithCredentials(
-        this.context,
         this.page,
         CONFIG.loginEmail,
         CONFIG.loginPassword
@@ -344,78 +313,6 @@ export class BrowserSession {
       log.error(`  ❌ Auto-login disabled and no valid auth state - manual login required`);
       return false;
     }
-  }
-
-  private getOriginFromUrl(url: string): string | null {
-    try {
-      return new URL(url).origin;
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * Safely restore sessionStorage when the page is on the expected origin
-   */
-  private async restoreSessionStorage(
-    sessionData: Record<string, string>,
-    entryCount: number
-  ): Promise<void> {
-    if (!this.page) {
-      log.warning(`  ⚠️  Cannot restore sessionStorage without an active page`);
-      return;
-    }
-
-    const targetOrigin = this.getOriginFromUrl(this.notebookUrl);
-    if (!targetOrigin) {
-      log.warning(`  ⚠️  Unable to determine target origin for sessionStorage restore`);
-      return;
-    }
-
-    let restored = false;
-
-    const applyToPage = async (): Promise<boolean> => {
-      if (!this.page) {
-        return false;
-      }
-
-      const currentOrigin = this.getOriginFromUrl(this.page.url());
-      if (currentOrigin !== targetOrigin) {
-        return false;
-      }
-
-      try {
-        await this.page.evaluate((data) => {
-          for (const [key, value] of Object.entries(data)) {
-            sessionStorage.setItem(key, value);
-          }
-        }, sessionData);
-        restored = true;
-        log.success(`  ✅ SessionStorage restored: ${entryCount} entries`);
-        return true;
-      } catch (error) {
-        log.warning(`  ⚠️  Failed to restore sessionStorage: ${error}`);
-        return false;
-      }
-    };
-
-    if (await applyToPage()) {
-      return;
-    }
-
-    log.info(`  ⏳ Waiting for NotebookLM origin before restoring sessionStorage...`);
-
-    const handleNavigation = async () => {
-      if (restored) {
-        return;
-      }
-
-      if (await applyToPage()) {
-        this.page?.off("framenavigated", handleNavigation);
-      }
-    };
-
-    this.page.on("framenavigated", handleNavigation);
   }
 
   /**

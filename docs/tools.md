@@ -1,6 +1,6 @@
 # Tools
 
-Every tool registered in custom version 0.0.1, with parameter schema, examples, return envelopes, bounds, and readiness/provenance caveats.
+Every tool registered in custom version 0.0.2, with parameter schema, examples, return envelopes, bounds, and readiness/provenance caveats.
 
 The server returns each tool result wrapped as `{ "success": true, "data": <object> }` (or `{ "success": false, "error": <string> }`). The shapes below describe the inner `data`.
 
@@ -530,18 +530,36 @@ No parameters.
 {
   "status": "ok",
   "authenticated": true,
+  "auth_status": "runtime_verified",
+  "auth_evidence": "live_notebooklm_readiness",
+  "notebook_url": "https://notebooklm.google.com/notebook/...",
+  "active_notebook_id": "example",
+  "active_notebook_name": "Example",
+  "total_notebooks": 1,
   "active_sessions": 1,
-  "version": "0.0.1",
-  "config": {
-    "headless": true,
-    "stealth_enabled": true,
-    "max_sessions": 10,
-    "answer_timeout_ms": 600000
-  }
+  "max_sessions": 10,
+  "session_timeout": 900,
+  "total_messages": 3,
+  "headless": true,
+  "auto_login_enabled": false,
+  "stealth_enabled": true
 }
 ```
 
-When `authenticated=false` the response also carries a `troubleshooting_tip` pointing at `setup_auth` / `cleanup_data`.
+`auth_status` has this exact offline classification:
+
+| Status | `authenticated` | Evidence |
+|---|---:|---|
+| `runtime_verified` | true | This process completed a live NotebookLM readiness check. |
+| `snapshot_usable` | true | Snapshot has unexpired persistent critical-cookie evidence. Google acceptance is not verified. |
+| `snapshot_indeterminate` | false | Session-only evidence can bootstrap an isolated browser but is not durable proof. |
+| `snapshot_missing` | false | No safe snapshot file. |
+| `snapshot_malformed` | false | Snapshot failed schema, size, ownership, mode, or no-follow checks. |
+| `snapshot_expired` | false | Only expired critical-cookie evidence remains. |
+| `not_authenticated` | false | No recognized authentication evidence. |
+
+When `authenticated=false` the response also carries a non-destructive
+`troubleshooting_tip`. `get_health` never launches a browser or contacts Google.
 
 ---
 
@@ -554,35 +572,38 @@ Opens a visible Chrome for first-time Google login.
 | `show_browser` | bool | no | Default `true` for setup. |
 | `browser_options` | object | no | Same shape as `ask_question`. |
 
-Waits for the user to complete login for up to 10 minutes. Existing saved profile/state is preserved; use `re_auth` for a destructive account reset. Verify with `get_health` afterwards.
+Waits for the user to complete login for up to 10 minutes. Existing persistent
+profile/state is preserved; a conflicting process receives `profile_busy`.
+Verify with `get_health` afterwards.
 
 ---
 
 ## re_auth
 
-Closes all sessions, deletes saved cookies + Chrome profile, opens a fresh login window.
+Unavailable. It returns `re_auth_unavailable` without opening a browser,
+changing configuration, rotating accounts, or touching authentication files.
 
 | Name | Type | Required | Notes |
 |---|---|---|---|
-| `show_browser` | bool | no | Default `true`. |
-| `browser_options` | object | no | |
+| `show_browser` | bool | no | Compatibility argument accepted but ignored. |
+| `browser_options` | object | no | Compatibility argument accepted but ignored. |
 
 ---
 
 ## cleanup_data
 
-Categorised preview + delete of every NotebookLM MCP file the server can find on the system. Designed for fresh-start workflows.
+Categorised, non-mutating preview of NotebookLM MCP files. Destructive cleanup
+is unavailable.
 
 | Name | Type | Required | Notes |
 |---|---|---|---|
-| `confirm` | bool | yes | `false` = preview only. `true` = delete after preview was reviewed. |
-| `preserve_library` | bool | no | Keep `library.json` while wiping everything else. Default `false`. |
+| `confirm` | bool | yes | `false` = preview only. `true` = `cleanup_unavailable` with no side effects. |
+| `preserve_library` | bool | no | `true` filters library-related paths out of the hypothetical preview. It never deletes files. |
 
 Workflow:
 
-1. `cleanup_data({ confirm: false, preserve_library: true })` — see what will be deleted.
-2. Close all Chrome instances.
-3. `cleanup_data({ confirm: true, preserve_library: true })` — execute.
+1. `cleanup_data({ confirm: false, preserve_library: true })` — inspect hypothetical non-library paths.
+2. Use the preview to diagnose storage; it does not delete anything.
 
 ---
 

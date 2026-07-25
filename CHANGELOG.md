@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.2] - 2026-07-25
+
+### Fixed
+
+- Replaced the 24-hour snapshot-mtime authentication verdict with strict,
+  evidence-based health states so an older but usable snapshot is not reported
+  as logged out.
+- Added crash-recoverable cross-process profile leasing and generation-scoped
+  browser teardown for safe concurrent Codex and Claude usage.
+- Hardened storage-state parsing, no-follow file handling, bounded atomic
+  writes, profile-lock classification, and isolated-profile fallback.
+
+### Changed
+
+- `get_health` now distinguishes live runtime verification, usable persistent
+  snapshots, indeterminate session-only evidence, missing, malformed, and
+  expired states without opening a browser or contacting Google.
+- `re_auth` now fails closed without modifying authentication until staged
+  profile switching can be implemented safely.
+- `cleanup_data` is preview-only and cannot delete local authentication data.
+- Added hermetic crash, race, teardown, schema, health, strategy, and
+  fail-closed regression tests.
+
 ## [0.0.1] - 2026-07-24
 
 - Added YouTube source registration, source-readiness polling, and bounded transcript export.

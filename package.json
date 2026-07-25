@@ -1,6 +1,6 @@
 {
   "name": "notebooklm-mcp-audio-custom",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "MCP server for Google NotebookLM — chat, source ingestion, audio overviews, citations, stdio + Streamable-HTTP transports.",
   "type": "module",
   "bin": {
@@ -12,7 +12,8 @@
     "watch": "tsc --watch",
     "dev": "tsx watch src/index.ts",
     "prepare": "npm run build",
-    "test": "npm run test:audio && npm run test:http && npm run test:core && npm run test:permissions && npm run test:launcher && npm run test:youtube && npm run test:readiness && npm run test:transcript && npm run test:workflow && npm run test:chat && npm run test:source-release",
+    "test": "npm run test:auth-persistence && npm run test:audio && npm run test:http && npm run test:core && npm run test:permissions && npm run test:launcher && npm run test:youtube && npm run test:readiness && npm run test:transcript && npm run test:workflow && npm run test:chat && npm run test:source-release",
+    "test:auth-persistence": "npm run build && node scripts/test-auth-persistence.mjs",
     "test:source-release": "bash scripts/test-source-release.sh",
     "test:youtube": "node scripts/test-youtube-source.mjs",
     "test:readiness": "node scripts/test-source-readiness.mjs",
@@ -66,11 +67,13 @@
     "env-paths": "^3.0.0",
     "globby": "^16.2.2",
     "patchright": "^1.48.2",
+    "proper-lockfile": "^4.1.2",
     "zod": "^3.22.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^20.11.0",
+    "@types/proper-lockfile": "^4.1.4",
     "eslint": "^10.2.1",
     "prettier": "^3.8.3",
     "tsx": "^4.7.0",
