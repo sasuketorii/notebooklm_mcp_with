@@ -18,7 +18,9 @@ fi
 for required in AGENTS.md CLAUDE.md UPSTREAM_BASELINE.json CUSTOM_TOOL_CONTRACTS.json TRUSTED_RELEASES.json \
   .github/workflows/ci.yml .github/workflows/release-gate.yml \
   .github/workflows/upstream-watch.yml .github/workflows/prepare-upstream-pr.yml; do
-  tar -tzf "$OUTPUT" | grep -Fqx "notebooklm-mcp-audio-custom/$required" || {
+  # Do not use grep -q here: under pipefail GNU tar can receive SIGPIPE after
+  # an early match and make a present entry look missing on Linux.
+  tar -tzf "$OUTPUT" | grep -Fx "notebooklm-mcp-audio-custom/$required" >/dev/null || {
     echo "Source release is missing required file: $required" >&2
     exit 1
   }

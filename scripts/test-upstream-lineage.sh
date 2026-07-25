@@ -154,13 +154,13 @@ expect_failure "repeated reviewed baseline" \
   bash "$update_script" "$(
     node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync("UPSTREAM_BASELINE.json")).upstream.commit)'
   )" --tag v2.0.0
-if rg -n -- 'fetch.*--tags|-X[[:space:]]+ours|REMOTE=origin|git push' \
+if grep -En -- 'fetch.*--tags|-X[[:space:]]+ours|REMOTE=origin|git push' \
   "$update_script" >/dev/null; then
   echo "Updater contains a forbidden broad-fetch, ours, or push pattern" >&2
   exit 1
 fi
 if sed '/^cat <<EOF/,$d' "$update_script" |
-  rg -n '^[[:space:]]*git merge([[:space:]]|$)' >/dev/null; then
+  grep -En '^[[:space:]]*git merge([[:space:]]|$)' >/dev/null; then
   echo "Updater executes a scripted merge instead of stopping for manual review" >&2
   exit 1
 fi

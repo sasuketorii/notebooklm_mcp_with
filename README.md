@@ -48,6 +48,12 @@ lacks this fork's custom tools; do not install it beside this fork, register
 `dist/index.js` directly, or manually merge upstream during setup. Managed-name
 conflicts fail safely before bootstrap modifies an unidentifiable registration.
 
+Cooperative installs are serialized by fail-closed per-client transaction
+locks held from inventory through rollback. Existing locks are never
+auto-broken, even when PID metadata looks stale. Same-user direct CLI/config
+writers do not honor these locks, so pause them for the full installation; the
+installer does not claim atomicity against non-cooperating writers.
+
 登録は [`docs/agent-setup.md`](./docs/agent-setup.md) の手順だけを使用してください。`notebooklm-audio` だけを登録し、上流の `npx notebooklm-mcp@latest` や `dist/index.js` の直接登録、インストール時の上流マージは行いません。既存MCPとの競合を安全に判別できない場合、bootstrapは設定変更前に停止します。
 
 After a successful install, restart every registered client. Both clients use the same per-OS-user browser profile.<br>
@@ -114,8 +120,9 @@ Maintainers use [`scripts/update-upstream.sh`](./scripts/update-upstream.sh) fro
 
 For this release, the reviewed upstream commit is also recorded by the durable
 fork audit tag `upstream/notebooklm/v2.0.0` (full ref:
-`refs/tags/upstream/notebooklm/v2.0.0`). That tag must be pushed alongside the
-custom `v0.0.3` release tag. Future reviewed integrations use the same
+`refs/tags/upstream/notebooklm/v2.0.0`). That audit tag is already public on
+`origin` with the reviewed, immutable SHA; this release push contains only
+`main` and the custom `v0.0.4` tag. Future reviewed integrations use the same
 `upstream/notebooklm/vX.Y.Z` convention. The updater only prepares a review
 candidate: it never creates or pushes tags, merges code, or publishes releases.
 

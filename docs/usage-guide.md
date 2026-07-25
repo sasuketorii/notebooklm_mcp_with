@@ -1,6 +1,6 @@
 # Usage Guide
 
-Practical end-to-end walkthroughs for custom version 0.0.3. Each section is a self-contained recipe with the exact tool calls / curl commands. The upstream base is recorded in `RELEASE_PROVENANCE.json`.
+Practical end-to-end walkthroughs for custom version 0.0.4. Each section is a self-contained recipe with the exact tool calls / curl commands. The upstream base is recorded in `RELEASE_PROVENANCE.json`.
 
 - [First-time setup](#first-time-setup)
 - [Multi-turn session pattern](#multi-turn-session-pattern)

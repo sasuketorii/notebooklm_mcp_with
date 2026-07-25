@@ -26,7 +26,14 @@ declare -a UPSTREAM_COMMANDS=()
 declare -a UPSTREAM_ARGS=()
 declare -a TARGET_MUTATED=()
 declare -a UPSTREAM_MUTATED=()
+declare -a INSTALLED_TARGET_COMMANDS=()
+declare -a INSTALLED_TARGET_ARGS=()
+declare -a LOCK_PATHS=()
+declare -a LOCK_TOKENS=()
+declare -a LOCK_IDENTITIES=()
+declare -a LOCK_CLIENTS=()
 CLI_MUTATION_OCCURRED=false
+LOCK_RELEASE_ATTEMPTED=false
 
 usage() {
   cat <<'EOF'
@@ -119,6 +126,108 @@ file_owner() {
   if [[ "$(uname -s)" == Darwin ]]; then stat -f '%u' "$1"; else stat -c '%u' "$1"; fi
 }
 
+file_identity() {
+  if [[ "$(uname -s)" == Darwin ]]; then stat -f '%d:%i' "$1"; else stat -c '%d:%i' "$1"; fi
+}
+
+release_client_locks() {
+  local index lock token owner_file failures=0
+  LOCK_RELEASE_ATTEMPTED=true
+  for ((index = ${#LOCK_PATHS[@]} - 1; index >= 0; index--)); do
+    lock="${LOCK_PATHS[$index]}"
+    token="${LOCK_TOKENS[$index]}"
+    owner_file="$lock/owner"
+    if [[ -L "$lock" || ! -d "$lock" ||
+          "$(file_owner "$lock" 2>/dev/null || true)" != "$(id -u)" ||
+          "$(file_mode "$lock" 2>/dev/null || true)" != 700 ||
+          "$(file_identity "$lock" 2>/dev/null || true)" != "${LOCK_IDENTITIES[$index]}" ||
+          -L "$owner_file" || ! -f "$owner_file" ||
+          "$(file_owner "$owner_file" 2>/dev/null || true)" != "$(id -u)" ||
+          "$(file_mode "$owner_file" 2>/dev/null || true)" != 600 ||
+          "$(sed -n '1p' "$owner_file" 2>/dev/null || true)" != "$token" ]]; then
+      echo "Installer lock ownership changed; refusing release: $lock" >&2
+      failures=$((failures + 1))
+      continue
+    fi
+    if ! "$NODE_BIN" -e '
+      const fs = require("node:fs");
+      const entries = fs.readdirSync(process.argv[1]);
+      process.exit(entries.length === 1 && entries[0] === "owner" ? 0 : 1);
+    ' "$lock"; then
+      echo "Installer lock contains unexpected state; preserving evidence: $lock" >&2
+      failures=$((failures + 1))
+      continue
+    fi
+    if ! rm -f -- "$owner_file"; then
+      echo "Installer lock owner metadata could not be removed: $owner_file" >&2
+      failures=$((failures + 1))
+      continue
+    fi
+    if ! rmdir -- "$lock"; then
+      # A same-user writer may race after the exact-content check. Recreate our
+      # owner evidence without overwriting anything, then leave the lock for
+      # manual inspection.
+      if [[ ! -e "$owner_file" && ! -L "$owner_file" ]]; then
+        (
+          set -o noclobber
+          {
+            printf '%s\n' "$token"
+            printf 'pid=%s\n' "$$"
+            printf 'client=%s\n' "${LOCK_CLIENTS[$index]}"
+          } > "$owner_file"
+          chmod 600 "$owner_file"
+        ) 2>/dev/null || true
+      fi
+      echo "Installer lock changed during release; preserving evidence: $lock" >&2
+      failures=$((failures + 1))
+    fi
+  done
+  (( failures == 0 ))
+}
+
+acquire_client_lock() {
+  local client="$1" config_file="$2" parent physical_parent lock token owner_file
+  [[ "$config_file" == /* && ! "$config_file" =~ [[:cntrl:]] ]] ||
+    { echo "Refusing non-absolute or control-character $client config path." >&2; return 1; }
+  parent="$(dirname -- "$config_file")"
+  [[ -d "$parent" && ! -L "$parent" ]] ||
+    { echo "Refusing missing, non-directory, or symlinked $client config parent: $parent" >&2; return 1; }
+  [[ "$(file_owner "$parent")" == "$(id -u)" ]] ||
+    { echo "Refusing $client config parent owned by another user: $parent" >&2; return 1; }
+  physical_parent="$(cd -- "$parent" && pwd -P)"
+  [[ "$physical_parent" == "$parent" ]] ||
+    { echo "Refusing $client config path containing a symlink: $parent" >&2; return 1; }
+  lock="$parent/.$(basename -- "$config_file").notebooklm-audio-install.lock"
+  if ! mkdir -- "$lock" 2>/dev/null; then
+    echo "Another installer may own the $client transaction lock: $lock" >&2
+    echo "The lock is never auto-broken; verify the owner and remove it manually only after all installers stop." >&2
+    return 1
+  fi
+  chmod 700 "$lock"
+  if [[ -L "$lock" || ! -d "$lock" ||
+        "$(file_owner "$lock")" != "$(id -u)" ||
+        "$(file_mode "$lock")" != 700 ]]; then
+    echo "New $client installer lock failed ownership/type/mode verification: $lock" >&2
+    return 1
+  fi
+  token="$("$NODE_BIN" -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
+  owner_file="$lock/owner"
+  {
+    printf '%s\n' "$token"
+    printf 'pid=%s\n' "$$"
+    printf 'client=%s\n' "$client"
+  } > "$owner_file"
+  chmod 600 "$owner_file"
+  [[ ! -L "$owner_file" && -f "$owner_file" &&
+     "$(file_owner "$owner_file")" == "$(id -u)" &&
+     "$(file_mode "$owner_file")" == 600 ]] ||
+    { echo "New $client installer lock metadata failed verification: $owner_file" >&2; return 1; }
+  LOCK_PATHS+=("$lock")
+  LOCK_TOKENS+=("$token")
+  LOCK_IDENTITIES+=("$(file_identity "$lock")")
+  LOCK_CLIENTS+=("$client")
+}
+
 backup_config() {
   local file="$1" auto_restore="${2:-false}" index="${#BACKUP_FILES[@]}" digest
   [[ ! -L "$file" ]] || { echo "Refusing symbolic-link configuration: $file" >&2; exit 1; }
@@ -151,7 +260,7 @@ mark_expected() {
   for ((index = 0; index < ${#BACKUP_FILES[@]}; index++)); do
     if [[ "${BACKUP_FILES[$index]}" == "$file" ]]; then
       EXPECTED_DIGESTS[index]="$expected_digest"
-      return
+      return 0
     fi
   done
   echo "Internal error: untracked transactional file $file" >&2
@@ -187,7 +296,7 @@ restore_configs() {
 }
 
 cleanup_registration() {
-  local status="$?" semantic_ok=true restore_ok=true
+  local status="$?" semantic_ok=true restore_ok=true locks_ok=true
   if "$ROLLBACK_NEEDED"; then
     echo "Registration failed; attempting checksum-aware rollback." >&2
     if "$CLI_MUTATION_OCCURRED" && declare -F rollback_registrations >/dev/null; then
@@ -200,9 +309,24 @@ cleanup_registration() {
     else
       echo "Rollback preserved one or more concurrent changes; backups remain in $ROLLBACK_DIR" >&2
     fi
+    if ! "$LOCK_RELEASE_ATTEMPTED"; then
+      release_client_locks || locks_ok=false
+    fi
+    "$locks_ok" || echo "One or more installer locks require manual inspection." >&2
+    if (( status == 0 )) && { ! "$semantic_ok" || ! "$restore_ok" || ! "$locks_ok"; }; then
+      status=1
+    fi
     return "$status"
   fi
   [[ -z "$ROLLBACK_DIR" ]] || rm -rf -- "$ROLLBACK_DIR"
+  if ! "$LOCK_RELEASE_ATTEMPTED"; then
+    release_client_locks || locks_ok=false
+  fi
+  "$locks_ok" || echo "One or more installer locks require manual inspection." >&2
+  if (( status == 0 )) && ! "$locks_ok"; then
+    status=1
+  fi
+  return "$status"
 }
 
 client_get() {
@@ -218,8 +342,8 @@ extract_command() {
   local output="$1" line
   while IFS= read -r line; do
     case "$line" in
-      "  command: "*) printf '%s' "${line#  command: }"; return ;;
-      "  Command: "*) printf '%s' "${line#  Command: }"; return ;;
+      "  command: "*) printf '%s' "${line#  command: }"; return 0 ;;
+      "  Command: "*) printf '%s' "${line#  Command: }"; return 0 ;;
     esac
   done <<< "$output"
 }
@@ -228,8 +352,8 @@ extract_args() {
   local output="$1" line
   while IFS= read -r line; do
     case "$line" in
-      "  args: "*) printf '%s' "${line#  args: }"; return ;;
-      "  Args: "*) printf '%s' "${line#  Args: }"; return ;;
+      "  args: "*) printf '%s' "${line#  args: }"; return 0 ;;
+      "  Args: "*) printf '%s' "${line#  Args: }"; return 0 ;;
     esac
   done <<< "$output"
 }
@@ -314,14 +438,14 @@ classify_registration() {
   local output="$1" command args package_root
   command="$(extract_command "$output")"
   args="$(extract_args "$output")"
-  [[ -n "$command" ]] || { printf 'unknown'; return; }
-  registration_env_is_empty "$output" || { printf 'unknown'; return; }
+  [[ -n "$command" ]] || { printf 'unknown'; return 0; }
+  registration_env_is_empty "$output" || { printf 'unknown'; return 0; }
   if [[ "$command" == "$ROOT_DIR/scripts/mcp-launcher.sh" &&
         ! -L "$command" && -f "$command" && -x "$command" &&
         "$(file_owner "$command")" == "$(id -u)" &&
         ( -z "$args" || "$args" == "-" ) ]]; then
     printf 'exact_custom'
-    return
+    return 0
   fi
   if [[ "$command" == /*/scripts/mcp-launcher.sh && ! -L "$command" &&
         -f "$command" && -x "$command" && "$(file_owner "$command")" == "$(id -u)" &&
@@ -329,15 +453,15 @@ classify_registration() {
     package_root="${command%/scripts/mcp-launcher.sh}"
     if trusted_release_candidate custom "$package_root"; then
       printf 'known_custom'
-      return
+      return 0
     fi
     printf 'unknown'
-    return
+    return 0
   fi
   if [[ "$command" == npx && \
         "$args" =~ ^(-y[[:space:]]+)?notebooklm-mcp@[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     printf 'known_upstream'
-    return
+    return 0
   fi
   if [[ "$command" == /*/dist/index.js && ! -L "$command" && -f "$command" &&
         -x "$command" && "$(file_owner "$command")" == "$(id -u)" &&
@@ -345,7 +469,7 @@ classify_registration() {
     package_root="${command%/dist/index.js}"
     if trusted_release_candidate upstream "$package_root"; then
       printf 'known_upstream'
-      return
+      return 0
     fi
   fi
   printf 'unknown'
@@ -357,11 +481,11 @@ inventory_registration() {
   absent_double="No MCP server named \"$name\"."
   if output="$(client_get "$client" "$name" 2>&1)"; then
     classify_registration "$output"
-    return
+    return 0
   fi
   if [[ "$output" == *"$absent_single"* || "$output" == *"$absent_double"* ]]; then
     printf 'absent'
-    return
+    return 0
   fi
   echo "Could not inventory $client registration $name: CLI get failed without an absent result." >&2
   return 1
@@ -369,6 +493,19 @@ inventory_registration() {
 
 "$REGISTER_CODEX" && CLIENTS+=(codex)
 "$REGISTER_CLAUDE" && CLIENTS+=(claude)
+
+# Acquire every requested client's atomic transaction lock in deterministic
+# client order before the first inventory read. Locks remain held through
+# mutation, read-back, and rollback. Existing locks are never treated as stale
+# or broken automatically, even when their optional PID metadata is old.
+trap cleanup_registration EXIT
+for client in "${CLIENTS[@]}"; do
+  if [[ "$client" == codex ]]; then
+    acquire_client_lock "$client" "$CODEX_CONFIG_FILE"
+  else
+    acquire_client_lock "$client" "$CLAUDE_CONFIG_FILE"
+  fi
+done
 
 # Inventory every requested client before changing any file or registration.
 for client in "${CLIENTS[@]}"; do
@@ -402,10 +539,11 @@ for client in "${CLIENTS[@]}"; do
   fi
   TARGET_MUTATED+=(none)
   UPSTREAM_MUTATED+=(false)
+  INSTALLED_TARGET_COMMANDS+=("")
+  INSTALLED_TARGET_ARGS+=("")
 done
 
 ROLLBACK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/notebooklm-mcp-audio.XXXXXX")"
-trap cleanup_registration EXIT
 "$REGISTER_CODEX" && backup_config "$CODEX_CONFIG_FILE" false
 "$REGISTER_CLAUDE" && backup_config "$CLAUDE_CONFIG_FILE" false
 backup_config "$ROOT_DIR/.audio-roots.env" true
@@ -483,19 +621,27 @@ remove_target_observed() {
 }
 
 add_custom_observed() {
-  local i="$1" client="$2" rc=0 current
+  local i="$1" client="$2" rc=0 current output
   if client_add_custom_raw "$client"; then
     # Record success before read-back.  A get failure must not erase evidence
     # that the CLI has already changed external configuration.
     TARGET_MUTATED[i]=installed
     CLI_MUTATION_OCCURRED=true
+    INSTALLED_TARGET_COMMANDS[i]="$ROOT_DIR/scripts/mcp-launcher.sh"
+    INSTALLED_TARGET_ARGS[i]=""
   else
     rc=$?
   fi
-  current="$(inventory_registration "$client" notebooklm-audio 2>/dev/null || printf unknown)"
+  if output="$(client_get "$client" notebooklm-audio 2>/dev/null)"; then
+    current="$(classify_registration "$output")"
+  else
+    current=unknown
+  fi
   if [[ "$current" == exact_custom ]]; then
     TARGET_MUTATED[i]=installed
     CLI_MUTATION_OCCURRED=true
+    INSTALLED_TARGET_COMMANDS[i]="$(extract_command "$output")"
+    INSTALLED_TARGET_ARGS[i]="$(extract_args "$output")"
   elif [[ "$current" != absent ]]; then
     echo "$client target changed unexpectedly during custom add." >&2
     return 1
@@ -530,6 +676,26 @@ registration_matches_original() {
        "$(extract_args "$output")" == "$expected_args" ]]
 }
 
+registration_matches_expected() {
+  local client="$1" name="$2" expected_class="$3" expected_command="$4" expected_args="$5" output actual_args
+  output="$(client_get "$client" "$name" 2>&1)" || return 1
+  actual_args="$(extract_args "$output")"
+  [[ "$actual_args" != "-" ]] || actual_args=""
+  [[ "$expected_args" != "-" ]] || expected_args=""
+  registration_env_is_empty "$output" &&
+    [[ "$(classify_registration "$output")" == "$expected_class" &&
+       "$(extract_command "$output")" == "$expected_command" &&
+       "$actual_args" == "$expected_args" ]]
+}
+
+require_expected_before_remove() {
+  local client="$1" name="$2" expected_class="$3" expected_command="$4" expected_args="$5"
+  if ! registration_matches_expected "$client" "$name" "$expected_class" "$expected_command" "$expected_args"; then
+    echo "$client registration $name changed before removal; refusing delete." >&2
+    return 1
+  fi
+}
+
 rollback_registrations() {
   local i client current failures=0
   for ((i = ${#CLIENTS[@]} - 1; i >= 0; i--)); do
@@ -552,7 +718,11 @@ rollback_registrations() {
     if [[ "${TARGET_MUTATED[$i]}" == installed ]]; then
       current="$(inventory_registration "$client" notebooklm-audio 2>/dev/null || printf unknown)"
       if [[ "$current" == exact_custom ]]; then
-        if client_remove_raw "$client" notebooklm-audio; then
+        if ! require_expected_before_remove "$client" notebooklm-audio exact_custom \
+             "${INSTALLED_TARGET_COMMANDS[$i]}" "${INSTALLED_TARGET_ARGS[$i]}"; then
+          echo "Semantic rollback skipped changed $client notebooklm-audio." >&2
+          failures=$((failures + 1))
+        elif client_remove_raw "$client" notebooklm-audio; then
           if [[ "${TARGET_CLASSES[$i]}" == absent ]]; then
             if [[ "$(inventory_registration "$client" notebooklm-audio 2>/dev/null || printf unknown)" != absent ]]; then
               echo "Semantic rollback absence read-back failed for $client notebooklm-audio." >&2
@@ -597,6 +767,8 @@ for ((i = 0; i < ${#CLIENTS[@]}; i++)); do
 
   if [[ "$target_class" != exact_custom ]]; then
     if [[ "$target_class" != absent ]]; then
+      require_expected_before_remove "$client" notebooklm-audio "$target_class" \
+        "${TARGET_COMMANDS[$i]}" "${TARGET_ARGS[$i]}"
       remove_target_observed "$i" "$client"
     fi
     add_custom_observed "$i" "$client"
@@ -605,10 +777,14 @@ for ((i = 0; i < ${#CLIENTS[@]}; i++)); do
   output="$(client_get "$client" notebooklm-audio 2>&1)"
   [[ "$(classify_registration "$output")" == exact_custom ]] ||
     { echo "$client custom registration read-back did not match the launcher." >&2; exit 1; }
+  INSTALLED_TARGET_COMMANDS[i]="$(extract_command "$output")"
+  INSTALLED_TARGET_ARGS[i]="$(extract_args "$output")"
 
   # A known duplicate is removed only after the integrated custom registration
   # has been read back successfully.
   if [[ "$upstream_class" != absent ]]; then
+    require_expected_before_remove "$client" notebooklm "$upstream_class" \
+      "${UPSTREAM_COMMANDS[$i]}" "${UPSTREAM_ARGS[$i]}"
     remove_upstream_observed "$i" "$client"
   fi
   if [[ "$upstream_class" != absent ]]; then
@@ -620,5 +796,9 @@ done
 ROLLBACK_NEEDED=false
 rm -rf -- "$ROLLBACK_DIR"
 ROLLBACK_DIR=""
+if ! release_client_locks; then
+  echo "Installation changes were verified, but transaction lock release failed; refusing success." >&2
+  exit 1
+fi
 echo "Installed and verified integrated MCP launcher: $ROOT_DIR/scripts/mcp-launcher.sh"
 echo "Next: call setup_auth with show_browser=true using the same OS user."

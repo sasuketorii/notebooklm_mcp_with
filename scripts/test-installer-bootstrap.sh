@@ -13,6 +13,27 @@ REAL_NODE="$(node -p 'process.execPath')"
 REAL_GIT="$(command -v git)"
 UPSTREAM_HEAD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
+# Keep filesystem probes deterministic across BSD/macOS and GNU/Linux.  Do
+# not use a stat fallback chain: GNU stat -f prints a filesystem report before
+# returning failure, which can contaminate command substitution output.
+file_mtime_size() {
+  local path="$1"
+  case "$(uname -s)" in
+    Darwin) stat -f '%m:%z' "$path" ;;
+    Linux) stat -c '%Y:%s' "$path" ;;
+    *) echo "unsupported stat platform: $(uname -s)" >&2; return 1 ;;
+  esac
+}
+
+file_mode() {
+  local path="$1"
+  case "$(uname -s)" in
+    Darwin) stat -f '%Lp' "$path" ;;
+    Linux) stat -c '%a' "$path" ;;
+    *) echo "unsupported stat platform: $(uname -s)" >&2; return 1 ;;
+  esac
+}
+
 make_checkout() {
   local root="$1"
   mkdir -p "$root/scripts" "$root/dist" "$root/.git"
@@ -116,6 +137,34 @@ case "$op" in
       fi
       exit 1
     fi
+    get_count_file="$state_dir/.get-count-$name"
+    get_count=0
+    [[ ! -f "$get_count_file" ]] || get_count="$(cat "$get_count_file")"
+    get_count=$((get_count + 1))
+    printf '%s\n' "$get_count" > "$get_count_file"
+    if [[ "${FAKE_PAUSE_ON_GET-}" == "$client:$name" && ! -e "$state_dir/.pause-complete-$name" ]]; then
+      : > "${FAKE_PAUSE_READY:?}"
+      while [[ ! -e "${FAKE_PAUSE_RELEASE:?}" ]]; do sleep 0.05; done
+      touch "$state_dir/.pause-complete-$name"
+    fi
+    if [[ "${FAKE_SWAP_ON_GET-}" == "$client:$name:$get_count" ]]; then
+      printf '/tmp/unknown-swapped-server\n\n' > "$state_dir/$name"
+      config_remove_name "$name"
+      printf 'mcp:%s:/tmp/unknown-swapped-server\n' "$name" >> "$config"
+    fi
+    if [[ "${FAKE_TAMPER_LOCK_ON_GET-}" == "$client:$name:$get_count:"* ]]; then
+      lock_path="$(dirname "$config")/.$(basename "$config").notebooklm-audio-install.lock"
+      case "$FAKE_TAMPER_LOCK_ON_GET" in
+        *:token)
+          printf 'tampered-owner-token\npid=0\nclient=%s\n' "$client" > "$lock_path/owner"
+          chmod 600 "$lock_path/owner"
+          ;;
+        *:extra)
+          printf 'unexpected-lock-content\n' > "$lock_path/unexpected"
+          ;;
+        *) exit 2 ;;
+      esac
+    fi
     if [[ "${FAKE_CONCURRENT_ON_GET-}" == "$client:$name" && ! -e "$state_dir/.concurrent-get-$name" ]]; then
       touch "$state_dir/.concurrent-get-$name"
       printf 'concurrent-change\n' >> "$config"
@@ -128,6 +177,14 @@ case "$op" in
     emit "$name"
     ;;
   add)
+    if [[ "${FAKE_UNKNOWN_OTHER_DURING_ADD-}" == "$client:"* ]]; then
+      IFS=: read -r _ other_client other_name <<< "$FAKE_UNKNOWN_OTHER_DURING_ADD"
+      other_config_var="$(printf '%s_CONFIG_FILE' "$(printf '%s' "$other_client" | tr '[:lower:]' '[:upper:]')")"
+      eval "other_config=\${$other_config_var:?}"
+      mkdir -p "${FAKE_STATE_DIR:?}/$other_client" "$(dirname "$other_config")"
+      printf '/tmp/unknown-before-rollback\n\n' > "${FAKE_STATE_DIR:?}/$other_client/$other_name"
+      printf 'mcp:%s:/tmp/unknown-before-rollback\n' "$other_name" >> "$other_config"
+    fi
     [[ "${FAKE_FAIL_ADD-}" != "$client" ]] || exit 1
     name=""
     command=""
@@ -162,6 +219,10 @@ case "$op" in
     [[ "${FAKE_FAIL_REMOVE-}" != "$client:$name" ]] || exit 1
     rm -f -- "$state_dir/$name"
     config_remove_name "$name"
+    if [[ "${FAKE_UNKNOWN_AFTER_REMOVE-}" == "$client:$name" ]]; then
+      printf '/tmp/unknown-after-remove\n\n' > "$state_dir/$name"
+      printf 'mcp:%s:/tmp/unknown-after-remove\n' "$name" >> "$config"
+    fi
     [[ "${FAKE_PARTIAL_REMOVE-}" != "$client:$name" ]] || exit 1
     ;;
   *) exit 2 ;;
@@ -197,7 +258,9 @@ run_case() {
   export PATH
   unset FAKE_FAIL_ADD FAKE_FAIL_GET FAKE_FAIL_REMOVE FAKE_CONCURRENT_ON_GET
   unset FAKE_CONCURRENT_DURING_ADD FAKE_PARTIAL_ADD FAKE_PARTIAL_REMOVE
-  unset FAKE_NOOP_ADD FAKE_MERGE_BASE_FAIL
+  unset FAKE_NOOP_ADD FAKE_MERGE_BASE_FAIL FAKE_PAUSE_ON_GET FAKE_PAUSE_READY
+  unset FAKE_PAUSE_RELEASE FAKE_SWAP_ON_GET FAKE_UNKNOWN_AFTER_REMOVE
+  unset FAKE_UNKNOWN_OTHER_DURING_ADD FAKE_TAMPER_LOCK_ON_GET
 }
 
 assert_build_contract() {
@@ -214,11 +277,11 @@ assert_build_contract() {
 run_case neither
 auth="$HOME_DIR/.local/share/notebooklm-mcp/browser_state/state.json"
 mkdir -p "$(dirname "$auth")"; printf 'auth-sentinel' > "$auth"
-auth_before="$(stat -f '%m:%z' "$auth" 2>/dev/null || stat -c '%Y:%s' "$auth")"
+auth_before="$(file_mtime_size "$auth")"
 if "$CHECKOUT/scripts/bootstrap.sh" --auto >/dev/null 2>&1; then
   echo "auto mode accepted a host with neither client" >&2; exit 1
 fi
-[[ "$(stat -f '%m:%z' "$auth" 2>/dev/null || stat -c '%Y:%s' "$auth")" == "$auth_before" ]]
+[[ "$(file_mtime_size "$auth")" == "$auth_before" ]]
 [[ "$(cat "$auth")" == auth-sentinel ]]
 
 # Strict freshness fails before creating the default inbox.
@@ -236,15 +299,15 @@ ln -s fake-mcp-client "$BIN/codex"
 seed_registration "$STATE" codex notebooklm npx '-y notebooklm-mcp@2.0.0'
 auth="$HOME_DIR/.local/share/notebooklm-mcp/browser_state/state.json"
 mkdir -p "$(dirname "$auth")"; printf 'auth-sentinel' > "$auth"
-auth_before="$(stat -f '%m:%z' "$auth" 2>/dev/null || stat -c '%Y:%s' "$auth")"
+auth_before="$(file_mtime_size "$auth")"
 "$CHECKOUT/scripts/bootstrap.sh" --auto >/dev/null
 default_root="$HOME_DIR/notebooklm-audio-inbox"
 [[ -d "$default_root" ]]
-mode="$(stat -f '%Lp' "$default_root" 2>/dev/null || stat -c '%a' "$default_root")"
+mode="$(file_mode "$default_root")"
 [[ "$mode" == 700 ]]
 [[ -f "$STATE/codex/notebooklm-audio" && ! -e "$STATE/codex/notebooklm" ]]
 [[ "$(cat "$auth")" == auth-sentinel ]]
-[[ "$(stat -f '%m:%z' "$auth" 2>/dev/null || stat -c '%Y:%s' "$auth")" == "$auth_before" ]]
+[[ "$(file_mtime_size "$auth")" == "$auth_before" ]]
 assert_build_contract "$LOG"
 
 # Claude-only mode.
@@ -353,6 +416,75 @@ if "$CHECKOUT/scripts/install.sh" --codex --audio-root "$CASE" >/dev/null 2>&1; 
 fi
 [[ "$(cat "$CASE/real-config")" == real-config ]]
 
+# A second cooperative installer fails on the client lock before inventory and
+# makes no client config, private env, or browser-auth mutation.
+run_case lock_contention
+ln -s fake-mcp-client "$BIN/codex"
+printf 'original-config\n' > "$CODEX_CONFIG_FILE"
+seed_registration "$STATE" codex notebooklm-audio "$CHECKOUT/scripts/mcp-launcher.sh" ''
+printf 'old-env\n' > "$CHECKOUT/.audio-roots.env"; chmod 600 "$CHECKOUT/.audio-roots.env"
+auth="$HOME_DIR/.local/share/notebooklm-mcp/browser_state/state.json"
+mkdir -p "$(dirname "$auth")"; printf 'auth-sentinel\n' > "$auth"
+config_before="$(shasum -a 256 "$CODEX_CONFIG_FILE" | awk '{print $1}')"
+env_before="$(shasum -a 256 "$CHECKOUT/.audio-roots.env" | awk '{print $1}')"
+auth_before="$(shasum -a 256 "$auth" | awk '{print $1}')"
+export FAKE_PAUSE_ON_GET=codex:notebooklm-audio
+export FAKE_PAUSE_READY="$CASE/pause-ready"
+export FAKE_PAUSE_RELEASE="$CASE/pause-release"
+"$CHECKOUT/scripts/install.sh" --codex --audio-root "$CASE" >"$CASE/first.log" 2>&1 &
+first_pid=$!
+for _ in $(seq 1 200); do
+  [[ -e "$FAKE_PAUSE_READY" ]] && break
+  kill -0 "$first_pid" 2>/dev/null || break
+  sleep 0.05
+done
+[[ -e "$FAKE_PAUSE_READY" ]]
+if "$CHECKOUT/scripts/install.sh" --codex --audio-root "$CASE" >"$CASE/second.log" 2>&1; then
+  echo "second installer acquired an already-owned client lock" >&2
+  touch "$FAKE_PAUSE_RELEASE"; wait "$first_pid" || true
+  exit 1
+fi
+[[ "$(shasum -a 256 "$CODEX_CONFIG_FILE" | awk '{print $1}')" == "$config_before" ]]
+[[ "$(shasum -a 256 "$CHECKOUT/.audio-roots.env" | awk '{print $1}')" == "$env_before" ]]
+[[ "$(shasum -a 256 "$auth" | awk '{print $1}')" == "$auth_before" ]]
+grep -F 'never auto-broken' "$CASE/second.log" >/dev/null
+touch "$FAKE_PAUSE_RELEASE"
+wait "$first_pid"
+[[ ! -e "$HOME_DIR/.codex/.config.toml.notebooklm-audio-install.lock" ]]
+
+# A tampered owner token makes the otherwise successful install fail before its
+# success line, and the lock evidence is left untouched for inspection.
+run_case tampered_lock_release
+ln -s fake-mcp-client "$BIN/codex"
+seed_registration "$STATE" codex notebooklm-audio "$CHECKOUT/scripts/mcp-launcher.sh" ''
+export FAKE_TAMPER_LOCK_ON_GET=codex:notebooklm-audio:3:token
+tampered_log="$CASE/install.log"
+if "$CHECKOUT/scripts/install.sh" --codex --audio-root "$CASE" >"$tampered_log" 2>&1; then
+  echo "installer reported success after owner-token tampering" >&2; exit 1
+fi
+if grep -F 'Installed and verified integrated MCP launcher' "$tampered_log" >/dev/null; then
+  echo "tampered-lock failure emitted the installer success line" >&2; exit 1
+fi
+tampered_lock="$HOME_DIR/.codex/.config.toml.notebooklm-audio-install.lock"
+[[ -d "$tampered_lock" ]]
+grep -Fx 'tampered-owner-token' "$tampered_lock/owner" >/dev/null
+
+# Unexpected lock contents are detected before owner metadata is deleted.
+run_case unexpected_lock_release
+ln -s fake-mcp-client "$BIN/codex"
+seed_registration "$STATE" codex notebooklm-audio "$CHECKOUT/scripts/mcp-launcher.sh" ''
+export FAKE_TAMPER_LOCK_ON_GET=codex:notebooklm-audio:3:extra
+unexpected_log="$CASE/install.log"
+if "$CHECKOUT/scripts/install.sh" --codex --audio-root "$CASE" >"$unexpected_log" 2>&1; then
+  echo "installer reported success with unexpected lock contents" >&2; exit 1
+fi
+if grep -F 'Installed and verified integrated MCP launcher' "$unexpected_log" >/dev/null; then
+  echo "unexpected-lock failure emitted the installer success line" >&2; exit 1
+fi
+unexpected_lock="$HOME_DIR/.codex/.config.toml.notebooklm-audio-install.lock"
+[[ -f "$unexpected_lock/owner" && -f "$unexpected_lock/unexpected" ]]
+grep -E '^[0-9a-f]{64}$' "$unexpected_lock/owner" >/dev/null
+
 # Add failure restores the private env and unchanged client config.
 run_case add_failure
 ln -s fake-mcp-client "$BIN/codex"
@@ -376,6 +508,35 @@ if "$CHECKOUT/scripts/install.sh" --codex --audio-root "$CASE" >/dev/null 2>&1; 
   echo "installer ignored get failure" >&2; exit 1
 fi
 [[ "$(cat "$CODEX_CONFIG_FILE")" == original-config ]]
+[[ ! -e "$STATE/codex/notebooklm-audio" ]]
+
+# A previously trusted custom target swapped to an unknown registration during
+# the immediate pre-remove inventory is never deleted or overwritten.
+run_case target_swap_before_remove
+ln -s fake-mcp-client "$BIN/codex"
+old="$CASE/old custom"
+mkdir -p "$old/scripts"
+for old_file in package.json RELEASE_PROVENANCE.json scripts/mcp-launcher.sh; do
+  "$REAL_GIT" -C "$PROJECT_ROOT" show "aa7d45935a236cd4824fb74a9890b556a17eb1b3:$old_file" > "$old/$old_file"
+done
+printf 'aa7d45935a236cd4824fb74a9890b556a17eb1b3\n' > "$old/.fake-head"
+chmod +x "$old/scripts/mcp-launcher.sh"
+seed_registration "$STATE" codex notebooklm-audio "$old/scripts/mcp-launcher.sh" ''
+export FAKE_SWAP_ON_GET=codex:notebooklm-audio:3
+if "$CHECKOUT/scripts/install.sh" --codex --audio-root "$CASE" >/dev/null 2>&1; then
+  echo "installer deleted a target swapped before removal" >&2; exit 1
+fi
+grep -Fx '/tmp/unknown-swapped-server' "$STATE/codex/notebooklm-audio" >/dev/null
+
+# The same immediate equality gate protects the reserved upstream duplicate.
+run_case upstream_swap_before_remove
+ln -s fake-mcp-client "$BIN/codex"
+seed_registration "$STATE" codex notebooklm npx '-y notebooklm-mcp@2.0.0'
+export FAKE_SWAP_ON_GET=codex:notebooklm:3
+if "$CHECKOUT/scripts/install.sh" --codex --audio-root "$CASE" >/dev/null 2>&1; then
+  echo "installer deleted an upstream registration swapped before removal" >&2; exit 1
+fi
+grep -Fx '/tmp/unknown-swapped-server' "$STATE/codex/notebooklm" >/dev/null
 
 # A failure in the second client semantically rolls back the first client too.
 run_case cross_client_failure
@@ -460,5 +621,17 @@ if "$CHECKOUT/scripts/install.sh" --codex --audio-root "$CASE" >"$rollback_log" 
   echo "installer accepted a rollback add with no state change" >&2; exit 1
 fi
 grep -E 'rollback (failed|read-back)' "$rollback_log" >/dev/null
+
+# Rollback never restores a stale known registration over a newly unknown one.
+run_case rollback_unknown_preserved
+ln -s fake-mcp-client "$BIN/codex"
+ln -s fake-mcp-client "$BIN/claude"
+seed_registration "$STATE" codex notebooklm npx '-y notebooklm-mcp@2.0.0'
+export FAKE_FAIL_ADD=claude
+export FAKE_UNKNOWN_OTHER_DURING_ADD=claude:codex:notebooklm
+if "$CHECKOUT/scripts/install.sh" --all --audio-root "$CASE" >/dev/null 2>&1; then
+  echo "installer ignored second-client failure after upstream removal" >&2; exit 1
+fi
+grep -Fx '/tmp/unknown-before-rollback' "$STATE/codex/notebooklm" >/dev/null
 
 echo "installer/bootstrap isolated failure matrix: PASS"

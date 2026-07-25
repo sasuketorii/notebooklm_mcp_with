@@ -72,6 +72,17 @@ manually remove conflicting aliases before setup. For a reserved-name conflict,
 preserve details and explain the conflict; never delete authentication data,
 browser profiles, or unrelated MCP entries.
 
+The installer serializes cooperative installs with an atomic per-client lock
+next to that client's configuration. It acquires every requested lock before
+inventory and holds it through mutation, read-back, and rollback. Lock
+contention fails closed; PID metadata is informational only, and the installer
+never guesses that an existing lock is stale or removes it automatically.
+After confirming that no installer process is running, a same-user operator may
+inspect and manually remove an abandoned lock. Direct `codex mcp`, `claude mcp`,
+or config-file edits by another same-user process do not participate in this
+protocol and cannot be made atomic by the installer; pause those writers for the
+entire bootstrap transaction.
+
 ## Authentication and completion
 
 After bootstrap succeeds, restart every client that was registered. Then, in
@@ -102,9 +113,10 @@ behavior, runs the full verification suite, obtains review approval, and
 publishes a new fork release. Users update by installing a reviewed release of
 this fork only.
 
-The v0.0.3 release also carries the fork-owned audit tag
-`refs/tags/upstream/notebooklm/v2.0.0`, which must be pushed together with the
-custom `v0.0.3` release tag. Future reviewed integrations use
+The v0.0.4 release also carries the fork-owned audit tag
+`refs/tags/upstream/notebooklm/v2.0.0`, already public on `origin` at the
+reviewed immutable SHA. The release push for v0.0.4 contains only `main` and
+the custom `v0.0.4` tag. Future reviewed integrations use
 `upstream/notebooklm/vX.Y.Z`. `scripts/update-upstream.sh` prepares and checks a
 candidate only; it never creates or pushes tags, merges, or publishes releases.
 
