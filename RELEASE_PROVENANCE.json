@@ -1,6 +1,6 @@
 {
   "distribution": "notebooklm-mcp-audio-custom",
-  "custom_version": "0.0.4",
+  "custom_version": "0.0.5",
   "upstream": {
     "repository": "https://github.com/PleasePrompto/notebooklm-mcp.git",
     "tag": "v2.0.0",

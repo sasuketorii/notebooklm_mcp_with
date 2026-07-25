@@ -46,6 +46,7 @@ EOF
 .audio-roots.env
 node_modules/
 dist/
+DIST_MANIFEST.sha256
 EOF
 }
 
@@ -103,6 +104,11 @@ IFS=$'\t' read -r clean_checkout clean_public <<< "$(make_public_release clean)"
 # Ignored runtime state is not part of the shipping worktree and remains allowed.
 printf 'NOTEBOOKLM_AUDIO_ROOTS=/private/runtime\n' > "$clean_checkout/.audio-roots.env"
 "$VERIFY" --repo "$clean_checkout" --public-repository "$clean_public" >/dev/null
+
+printf 'ignored release manifest\n' > "$clean_checkout/DIST_MANIFEST.sha256"
+expect_failure "ignored release manifest" \
+  "$VERIFY" --repo "$clean_checkout" --public-repository "$clean_public"
+rm -f -- "$clean_checkout/DIST_MANIFEST.sha256"
 
 mkdir -p "$clean_checkout/tmp"
 printf 'hidden shipping file\n' > "$clean_checkout/tmp/hidden-script.sh"

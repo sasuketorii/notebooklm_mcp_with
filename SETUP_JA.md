@@ -118,7 +118,7 @@ HEADLESS=true ./scripts/start-http.sh
 `upstream/notebooklm/v2.0.0`（完全なrefは
 `refs/tags/upstream/notebooklm/v2.0.0`）は、レビュー済みの不変SHAで
 originに公開済みです。今回のrelease push対象は `main` とカスタム
-`v0.0.4` タグだけです。今後のレビュー済み統合も
+`v0.0.5` タグだけです。今後のレビュー済み統合も
 `upstream/notebooklm/vX.Y.Z` 形式を使います。updaterはレビュー候補の準備だけを行い、タグ作成・push・merge・
 リリース公開を自動実行しません。
 

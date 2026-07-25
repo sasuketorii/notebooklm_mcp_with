@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.5] - 2026-07-26
+
+### Fixed
+
+- Made manifest generation and verification root-aware, atomic, strict about
+  arguments, and fail-closed for unsafe paths, symlinks, special files, file-set
+  drift, and directory traversal failures.
+- Made source archive creation stage-only and concurrency-safe. The repository
+  manifest is no longer changed, and an archive replaces its destination only
+  after closed-set, checksum, ownership, layout, member-type, and forbidden-path
+  verification succeeds.
+- Added release regressions for zero-argument compatibility, explicit paths
+  containing spaces, tampering, non-regular entries, root-manifest preservation,
+  concurrent writers, and failure cleanup.
+- Added the reviewed `0.0.4` release to the trusted-release manifest.
+- No NotebookLM server feature or tool changes are included in this release.
+
 ## [0.0.4] - 2026-07-26
 
 ### Fixed
