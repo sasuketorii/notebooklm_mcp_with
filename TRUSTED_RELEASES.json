@@ -1,0 +1,30 @@
+{
+  "customRepository": "https://github.com/sasuketorii/notebooklm_mcp_with.git",
+  "customReleases": {
+    "0.0.1": {
+      "commit": "17e818d040dcc9360d5658c7c7dc54a2e04893aa",
+      "files": {
+        "package.json": "931b3e6bbf71cde8905a6ff59f551d10944c5996074b5875d3a8ae55747df07d",
+        "RELEASE_PROVENANCE.json": "deb3aa9dc830b0c52aed6b42395e0f416f05765a048503b9986f71743433f950",
+        "scripts/mcp-launcher.sh": "e4c39b941fbe551e15e9a14d304a80168297aaed15a834ed584223b1454a5a33"
+      }
+    },
+    "0.0.2": {
+      "commit": "aa7d45935a236cd4824fb74a9890b556a17eb1b3",
+      "files": {
+        "package.json": "be873a4eb752b24d6d6895cf387d539131210af4b9996fb76fc2cf16938d106e",
+        "RELEASE_PROVENANCE.json": "11b39a023b73f3ab79f58c093f2d8fbe2f17467cada8815a99f9b0c0059b4a70",
+        "scripts/mcp-launcher.sh": "e4c39b941fbe551e15e9a14d304a80168297aaed15a834ed584223b1454a5a33"
+      }
+    }
+  },
+  "upstreamReleases": {
+    "2.0.0": {
+      "commit": "50b3e7f67f8535d9899c5e2b1b68f37d17b72aef",
+      "files": {
+        "package.json": "b4475a18ad25b4c60a60a0b6de01c732345fc4eff03c9d6b0eb788af82b039a2",
+        "src/index.ts": "1fe85dc71558e782b4f6acaf24c9000c3caeb273461f60376c734375c490efcf"
+      }
+    }
+  }
+}

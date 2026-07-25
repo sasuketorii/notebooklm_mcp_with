@@ -1,0 +1,22 @@
+name: Upstream Watch
+
+on:
+  schedule:
+    - cron: "23 3 * * 1"
+  workflow_dispatch:
+
+# This job only observes public refs. It cannot write to this repository.
+permissions:
+  contents: read
+
+jobs:
+  observe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: List upstream main and stable tag refs
+        env:
+          UPSTREAM_URL: https://github.com/PleasePrompto/notebooklm-mcp.git
+        run: |
+          set -euo pipefail
+          git ls-remote --refs "$UPSTREAM_URL" refs/heads/main 'refs/tags/v*'

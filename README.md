@@ -1,7 +1,7 @@
 # NotebookLM MCP with Audio (custom fork)
 
 Repository: <https://github.com/sasuketorii/notebooklm_mcp_with><br>
-Version: **0.0.2 (source-only distribution)**
+Release version and reviewed upstream provenance: [`RELEASE_PROVENANCE.json`](./RELEASE_PROVENANCE.json)
 
 This is a maintained custom fork of [PleasePrompto/notebooklm-mcp](https://github.com/PleasePrompto/notebooklm-mcp). It keeps NotebookLM chat, web-URL/text sources, library and audio-overview tools, and adds a bounded local-audio/YouTube workflow. It is intended for local or single-principal use through Codex or Claude Code; it is not an npm package release.
 
@@ -35,36 +35,23 @@ Full schemas and return envelopes are in [`docs/tools.md`](./docs/tools.md).
 
 ## Install and register / インストールと登録
 
-Requirements: Node.js **22.13+**, Google Chrome (or bundled Patchright Chromium), and Codex CLI and/or Claude Code.
+Give Codex or Claude Code this repository URL and ask it to set up the MCP. The agent-facing, safe one-prompt procedure is [`docs/agent-setup.md`](./docs/agent-setup.md); it uses `./scripts/bootstrap.sh --auto` and is the only supported installation path.
 
-```bash
-git clone https://github.com/sasuketorii/notebooklm_mcp_with.git
-cd notebooklm_mcp_with
-chmod +x scripts/*.sh
-mkdir -p "$HOME/notebooklm-audio-inbox"
-./scripts/install.sh --all --audio-root "$HOME/notebooklm-audio-inbox"
-./scripts/doctor.sh
-```
+Requirements are Git, Node.js **22.13+**, npm, and Codex CLI and/or Claude Code. Bootstrap creates the default private audio input at `$HOME/notebooklm-audio-inbox` (mode `0700`) unless a safe `--audio-root` is explicitly supplied. It validates the reviewed release lineage, installs dependencies without package lifecycle scripts, builds, tests, runs `doctor`, and makes client registration transactional with read-back verification.
 
-`install.sh --codex` and `--claude` register the local `scripts/mcp-launcher.sh` as `notebooklm-audio`. The launcher fixes the built entrypoint, Node executable, and permitted audio root. Do **not** register `dist/index.js` directly.
+Bootstrap requires a real Git checkout because lineage verification needs Git history. A `*-source.tar.gz` release archive has no `.git`; use it for inspection or audit, not one-prompt installation.
 
-`npx notebooklm-mcp@latest` is **upstream only** and does not contain these custom tools. Do not use it as this fork's installation command.
+Bootstrap manages only the reserved server names `notebooklm-audio` and
+`notebooklm`; it cannot inventory arbitrary aliases. Remove conflicting custom
+aliases manually before setup. `npx notebooklm-mcp@latest` is upstream-only and
+lacks this fork's custom tools; do not install it beside this fork, register
+`dist/index.js` directly, or manually merge upstream during setup. Managed-name
+conflicts fail safely before bootstrap modifies an unidentifiable registration.
 
-The launcher can also be registered manually:
+登録は [`docs/agent-setup.md`](./docs/agent-setup.md) の手順だけを使用してください。`notebooklm-audio` だけを登録し、上流の `npx notebooklm-mcp@latest` や `dist/index.js` の直接登録、インストール時の上流マージは行いません。既存MCPとの競合を安全に判別できない場合、bootstrapは設定変更前に停止します。
 
-```bash
-# Codex CLI
-codex mcp add notebooklm-audio -- "$PWD/scripts/mcp-launcher.sh"
-# Claude Code
-claude mcp add notebooklm-audio -- "$PWD/scripts/mcp-launcher.sh"
-```
-
-`install.sh` performs the supported validation and rollback checks; prefer it when both clients are installed.
-
-`install.sh` はNode/npm、CLI、音声ルートを検証してから登録し、途中で失敗した場合は既存設定を復元します。手動登録では現在のチェックアウトの `scripts/mcp-launcher.sh` を指定し、上流の `npx` や `dist/index.js` を指定しないでください。
-
-After registration, restart the client and verify that the server name is `notebooklm-audio`; both clients use the same per-OS-user browser profile.<br>
-登録後はクライアントを再起動し、サーバー名が `notebooklm-audio` であることを確認してください。両クライアントは同じOSユーザーのブラウザプロファイルを共有します。
+After a successful install, restart every registered client. Both clients use the same per-OS-user browser profile.<br>
+インストール成功後は、登録した各クライアントを再起動してください。CodexとClaude Codeは同一OSユーザー内で同じブラウザプロファイルを利用します。
 
 ## Authentication / 認証
 
@@ -74,7 +61,7 @@ In the same OS user that will run the MCP server, ask either client:
 Run notebooklm-audio setup_auth with show_browser=true.
 ```
 
-ログイン画面を表示してGoogleログインを完了してください。認証プロファイルはOSユーザーのアプリデータ領域に保存されます。`re_auth` は現在利用不可で、アカウント切替や認証削除は行いません。VPS/headless Linuxでは初回のみ `xvfb-run`、noVNC、またはSSH X11で表示を提供し、その後は `HEADLESS=true` で常駐できます。rootとサービスユーザーでプロファイルを共有しないでください。
+ログイン画面を表示してGoogleログインを完了してください。`setup_auth` は既存の認証情報を意図的に削除しませんが、対話ログインにより永続プロファイルやセッションが更新されるため、状態保持を保証しません。認証プロファイルはOSユーザーのアプリデータ領域に保存されます。`re_auth` は現在利用不可で、アカウント切替や認証削除は行いません。VPS/headless Linuxでは初回のみ `xvfb-run`、noVNC、またはSSH X11で表示を提供し、その後は `HEADLESS=true` で常駐できます。rootとサービスユーザーでプロファイルを共有しないでください。
 
 ## Workflows / ワークフロー
 
@@ -96,6 +83,8 @@ HEADLESS=true ./scripts/start-http.sh
 ```
 
 The server binds to `127.0.0.1` (and uses `/mcp` plus `/healthz`). Bearer authentication is required; this is a single-principal trust domain. Never commit the token, expose cleartext HTTP publicly, or share one token across tenants. For remote access, put TLS and authentication in a separately managed reverse proxy or private Tailscale network. The stdio transport is the default and avoids opening a network listener.
+
+The launcher environment retains compatibility with the two-key stdio form (`NOTEBOOKLM_NODE_BIN` and `NOTEBOOKLM_AUDIO_ROOTS`); its bearer token is optional for stdio and mandatory for HTTP. The installer may write the current three-key form including `NOTEBOOKLM_HTTP_BEARER_TOKEN`. Do not edit or expose `.audio-roots.env`.
 
 HTTPは `127.0.0.1` のみにbindし、Bearer token（32 byte以上）を要求します。tokenをコミットせず、平文HTTPを公開せず、複数テナントで共有しないでください。遠隔利用はTLS・認証付きリバースプロキシまたは非公開Tailscaleを前段に置きます。既定のstdioはネットワーク待受を開きません。
 
@@ -119,16 +108,18 @@ VPSでは実行専用OSユーザーとGoogleアカウントごとのChromeプロ
 
 ## Upstream updates / 上流追従
 
-Keep a Git checkout (source-only archives have no `.git`). Review the diff before applying:
+End users never merge upstream code at installation time. Each published fork release records a reviewed upstream base in `RELEASE_PROVENANCE.json`; “reviewed latest at release” describes that release-review decision, not a promise to fetch whatever upstream publishes later. Install a reviewed release of this fork only.
 
-```bash
-./scripts/update-upstream.sh
-./scripts/update-upstream.sh --apply
-```
+Maintainers use [`scripts/update-upstream.sh`](./scripts/update-upstream.sh) from a Git checkout, review the diff, preserve the custom audio workflow, run the full verification suite, obtain review approval, and publish a new fork release. Source-only archives have no `.git` and cannot perform upstream tracking.
 
-The apply path runs install/check/test and manifest verification, but a failed check does not automatically reset a merge. Re-review custom audio selectors and run a visible `add_audio_source` smoke test after NotebookLM UI changes.
+For this release, the reviewed upstream commit is also recorded by the durable
+fork audit tag `upstream/notebooklm/v2.0.0` (full ref:
+`refs/tags/upstream/notebooklm/v2.0.0`). That tag must be pushed alongside the
+custom `v0.0.3` release tag. Future reviewed integrations use the same
+`upstream/notebooklm/vX.Y.Z` convention. The updater only prepares a review
+candidate: it never creates or pushes tags, merges code, or publishes releases.
 
-`--apply` はinstall/check/testとmanifest検証を実行しますが、失敗時に自動resetしません。UI変更後は音声セレクタをレビューし、`show_browser=true` の実機音声登録を確認してください。
+利用者はインストール時に上流をマージしません。各forkリリースはレビュー済み上流基点を `RELEASE_PROVENANCE.json` に記録します。「release時点でレビュー済み最新」とは、公開時に選定・統合・検証した上流状態を指し、利用時に上流最新版を自動取得・結合する意味ではありません。上流追従はメンテナーがレビューと検証を経て新しいforkリリースとして公開します。
 
 ## Tests and source-only release / テストと配布
 

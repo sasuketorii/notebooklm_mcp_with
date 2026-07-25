@@ -6,6 +6,34 @@ OUTPUT="$(mktemp "${TMPDIR:-/tmp}/notebooklm-mcp-source-test.XXXXXX.tar.gz")"
 trap 'rm -f -- "$OUTPUT"' EXIT
 
 "$ROOT_DIR/scripts/make-source-release.sh" "$OUTPUT" >/dev/null
+
+# The source archive is an audit artifact, not an installation boundary: fail closed if a release
+# drops governance, lineage, contract, or CI metadata from the manifest.
+if command -v shasum >/dev/null; then
+  hash_file() { shasum -a 256 "$1" | awk '{print $1}'; }
+else
+  hash_file() { sha256sum "$1" | awk '{print $1}'; }
+fi
+
+for required in AGENTS.md CLAUDE.md UPSTREAM_BASELINE.json CUSTOM_TOOL_CONTRACTS.json TRUSTED_RELEASES.json \
+  .github/workflows/ci.yml .github/workflows/release-gate.yml \
+  .github/workflows/upstream-watch.yml .github/workflows/prepare-upstream-pr.yml; do
+  tar -tzf "$OUTPUT" | grep -Fqx "notebooklm-mcp-audio-custom/$required" || {
+    echo "Source release is missing required file: $required" >&2
+    exit 1
+  }
+done
+
+for required in AGENTS.md CLAUDE.md UPSTREAM_BASELINE.json CUSTOM_TOOL_CONTRACTS.json TRUSTED_RELEASES.json \
+  .github/workflows/ci.yml .github/workflows/release-gate.yml \
+  .github/workflows/upstream-watch.yml .github/workflows/prepare-upstream-pr.yml; do
+  grep -Fqx "$(hash_file "$ROOT_DIR/$required")  $required" \
+    "$ROOT_DIR/DIST_MANIFEST.sha256" || {
+    echo "Manifest is missing required file: $required" >&2
+    exit 1
+  }
+done
+
 python3 - "$OUTPUT" <<'PY'
 import sys
 import tarfile

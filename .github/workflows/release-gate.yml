@@ -1,0 +1,79 @@
+name: Release Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Exact release tag to validate (for example v0.0.3)"
+        required: true
+        type: string
+      sha:
+        description: "Exact lowercase 40-character commit SHA that the release tag must resolve to"
+        required: true
+        type: string
+
+# This is a manual validation gate, not a publisher.
+permissions:
+  contents: read
+
+jobs:
+  validate-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Validate stable release tag syntax
+        env:
+          RELEASE_REF: ${{ inputs.ref }}
+          RELEASE_SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "ref must be an exact stable vX.Y.Z tag" >&2; exit 2; }
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "sha must be a lowercase 40-character commit SHA" >&2; exit 2; }
+      - name: Check out the requested release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          # Lineage verification inspects the audited upstream merge ancestry and tags.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+      - name: Verify tag matches package version
+        env:
+          RELEASE_REF: ${{ inputs.ref }}
+          RELEASE_SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$RELEASE_SHA" ]] || { echo "checked out tag did not resolve to the supplied SHA" >&2; exit 1; }
+          tag_ref="$(git ls-remote --refs origin "refs/tags/$RELEASE_REF")"
+          [[ -n "$tag_ref" ]] || { echo "release tag is absent from origin" >&2; exit 1; }
+          tag_object="${tag_ref%%$'\t'*}"
+          peeled_ref="$(git ls-remote origin "refs/tags/$RELEASE_REF^{}")"
+          if [[ -n "$peeled_ref" ]]; then
+            remote_tag_sha="${peeled_ref%%$'\t'*}"
+          else
+            remote_tag_sha="$tag_object"
+          fi
+          [[ "$remote_tag_sha" == "$RELEASE_SHA" ]] || { echo "origin release tag does not resolve to the supplied SHA" >&2; exit 1; }
+          [[ "$(node -p \"require('./package.json').version\")" == "${RELEASE_REF#v}" ]] || { echo "tag and package version differ" >&2; exit 1; }
+      - name: Validate trusted release history
+        env:
+          RELEASE_REF: ${{ inputs.ref }}
+          RELEASE_SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          node scripts/verify-trusted-releases.mjs \
+            --repo "$GITHUB_WORKSPACE" \
+            --origin origin \
+            --target-ref "$RELEASE_REF" \
+            --target-sha "$RELEASE_SHA"
+      - name: Full release validation
+        run: |
+          git diff --check
+          npm run check
+          npm test

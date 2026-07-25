@@ -1,0 +1,199 @@
+{
+  "contractSha256": "5d29204572fca133004a4ad3825bb95a13645efa0149231dda64b81fb8cb3352",
+  "formatVersion": 1,
+  "toolCount": 4,
+  "tools": [
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "file_paths": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "minItems": 1,
+            "type": "array"
+          },
+          "notebook_id": {
+            "type": "string"
+          },
+          "notebook_url": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "show_browser": {
+            "type": "boolean"
+          },
+          "timeout_ms": {
+            "maximum": 1200000,
+            "minimum": 30000,
+            "type": "number"
+          }
+        },
+        "required": [
+          "file_paths"
+        ],
+        "type": "object"
+      },
+      "name": "add_audio_source"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "notebook_id": {
+            "type": "string"
+          },
+          "notebook_url": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "show_browser": {
+            "type": "boolean"
+          },
+          "timeout_ms": {
+            "maximum": 1200000,
+            "minimum": 1000,
+            "type": "integer"
+          },
+          "url": {
+            "maxLength": 2048,
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      },
+      "name": "add_youtube_source"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "format": {
+            "enum": [
+              "json",
+              "markdown"
+            ],
+            "type": "string"
+          },
+          "max_chars": {
+            "maximum": 1000000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "notebook_id": {
+            "type": "string"
+          },
+          "notebook_url": {
+            "type": "string"
+          },
+          "output_name": {
+            "maxLength": 120,
+            "pattern": "^[A-Za-z0-9._-]+$",
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "show_browser": {
+            "type": "boolean"
+          },
+          "source_name": {
+            "maxLength": 300,
+            "type": "string"
+          },
+          "timeout_ms": {
+            "maximum": 1800000,
+            "minimum": 30000,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "source_name"
+        ],
+        "type": "object"
+      },
+      "name": "export_transcript"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "notebook_id": {
+            "type": "string"
+          },
+          "notebook_url": {
+            "type": "string"
+          },
+          "poll_interval_ms": {
+            "maximum": 30000,
+            "minimum": 50,
+            "type": "integer"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "show_browser": {
+            "type": "boolean"
+          },
+          "source_names": {
+            "items": {
+              "maxLength": 300,
+              "type": "string"
+            },
+            "maxItems": 10,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "stable_polls": {
+            "maximum": 20,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "timeout_ms": {
+            "maximum": 600000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "source_names"
+        ],
+        "type": "object"
+      },
+      "name": "wait_for_source_ready"
+    }
+  ]
+}

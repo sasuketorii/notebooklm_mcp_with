@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.3] - 2026-07-26
+
+### Added
+
+- Added a one-prompt bootstrap flow that installs the custom distribution and
+  guides authentication and health checks without exposing credentials.
+- Added safe, idempotent MCP registration helpers for Codex and Claude Code,
+  with bounded environment and permission validation.
+- Added upstream lineage, tool-contract, workflow-security, and update-tracking
+  checks so future upstream changes remain reviewable and fail closed.
+
+### Changed
+
+- Release metadata now records the custom `0.0.3` lineage from upstream
+  `v2.0.0`, including the reviewed baseline and distribution contracts.
+- Source-release manifests cover governance metadata, CI workflows, source,
+  documentation, and operational scripts while excluding credentials,
+  dependencies, caches, and build output.
+
 ## [0.0.2] - 2026-07-25
 
 ### Fixed

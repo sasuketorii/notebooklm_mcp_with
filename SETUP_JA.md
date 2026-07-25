@@ -1,14 +1,14 @@
 # NotebookLM MCP 音声アップロード版：新規環境セットアップ
 
-このフォルダは `notebooklm-mcp` v2.0.0 を基点にしたローカルfork（カスタム版 `0.0.2`）です。通常の `add_source`（Web URL／貼り付けテキスト）は変更せず、音声・YouTube登録、解析準備待ち、文字起こしエクスポートを追加しています。
+このフォルダは `notebooklm-mcp` を基点にしたローカルforkです。通常の `add_source`（Web URL／貼り付けテキスト）は変更せず、音声・YouTube登録、解析準備待ち、文字起こしエクスポートを追加しています。リリースごとのレビュー済み上流基点は `RELEASE_PROVENANCE.json` を正とします。
 
 基本フローは `add_source(type=url)`（通常Webサイト）または `add_youtube_source`／`add_audio_source` → `wait_for_source_ready` → `export_transcript` です。`export_transcript` はNotebookLMのソースビューア表示を直接抽出します（チャットのモデル申告ではありません）が、元メディアとの独立検証は行わず、上限により部分結果になる場合があります。Drive、PDF/DOCX/画像など一般ファイル、音声以外のStudio生成物は未対応です。
 
-このカスタム版では **`npx notebooklm-mcp@latest` を使いません**。それは上流版を起動するため `add_audio_source` がありません。必ず、このフォルダの `scripts/mcp-launcher.sh` を `install.sh` 経由でCodex/Claudeへ登録します。`dist/index.js` の直接登録も不可です。音声許可ディレクトリとNode実行ファイルの固定が失われます。
+このカスタム版では **`npx notebooklm-mcp@latest` を使いません**。それは上流版を起動するため `add_audio_source` がありません。インストールは必ず [`docs/agent-setup.md`](./docs/agent-setup.md) のbootstrap経由で行います。`dist/index.js` の直接登録も不可です。音声許可ディレクトリとNode実行ファイルの固定が失われます。
 
 `add_audio_source` は NotebookLM の画面内にあるファイル選択UIをPatchright経由で操作します。Whisper等の外部ASRへ音声を送ったり、音声をローカルで文字起こししたりしません。
 
-基点は [`RELEASE_PROVENANCE.json`](./RELEASE_PROVENANCE.json) に固定しています（上流URL、`v2.0.0`、正確なコミット、カスタム版バージョン）。作者はこのカスタム版の `sasuketorii` とし、上流の original contributor と provenance は保持します。リポジトリ／ホームページ／バグ報告先はこのカスタム配布先を示します。
+基点は [`RELEASE_PROVENANCE.json`](./RELEASE_PROVENANCE.json) に固定しています（上流URL、正確なコミット、カスタム版バージョン）。作者はこのカスタム版の `sasuketorii` とし、上流の original contributor と provenance は保持します。リポジトリ／ホームページ／バグ報告先はこのカスタム配布先を示します。
 
 ## 配布時の原則
 
@@ -31,28 +31,21 @@ cd notebooklm_mcp_with
 ./scripts/generate-manifest.sh
 ```
 
-`./scripts/make-source-release.sh` が作る `*-source.tar.gz` は `.git` を含まない**インストール専用**アーカイブです。展開先で `install.sh` は実行できますが、上流追従はできません。上流を追従する運用には、このGitチェックアウトを保ちます。
+`./scripts/make-source-release.sh` が作る `*-source.tar.gz` は `.git` を含まないため、内容確認・監査用のアーティファクトです。one-prompt bootstrapはlineage検証にGit履歴を必要とするため、このアーカイブをセットアップ入力には使用しません。セットアップには必ずGitチェックアウトを使用します。
 
 ## macOS / Linux：インストール
 
-Node.js 22.13以上（推奨22 LTS）、Google Chrome、Codex CLIまたはClaude Codeを先に用意します。
+Node.js 22.13以上、npm、Git、Codex CLIまたはClaude Codeを先に用意します。ユーザーはこのリポジトリURLをCodexまたはClaude Codeへ渡し「セットアップして」と依頼できます。エージェントは必ず [`docs/agent-setup.md`](./docs/agent-setup.md) に従い、`./scripts/bootstrap.sh --auto` を実行します。
 
-```bash
-cd notebooklm_mcp_with
-chmod +x scripts/*.sh
-mkdir -p "$HOME/notebooklm-audio-inbox"
-./scripts/install.sh --all --audio-root "$HOME/notebooklm-audio-inbox"
-./scripts/doctor.sh
-```
+bootstrapは、対応CLIの検出、Git/Node/npmとチェックアウト済みリリースのレビュー済みprovenance/lineageの事前検証、安全な依存関係導入、build/check/test、`doctor`、MCP登録と読み戻し検証、失敗時ロールバックをまとめて行います。対象を明示する場合だけ `--codex`、`--claude`、`--all` を使います。上流mainの現在のcommitまで統合済みかをオンラインで追加確認する必要がある場合だけ `--require-upstream-current` を加えます。この追加gateはインストール前にfail-closedで停止しますが、上流コードのマージ・実行は行いません。
 
-`--all` はローカルビルドを以下の名前で登録します。
+音声入力先を指定しなければ、bootstrapは `$HOME/notebooklm-audio-inbox` を権限 `0700` で作成します。`--audio-root` で指定する場合も、実行OSユーザー／サービスユーザーだけが読める非共有ディレクトリにしてください。ホーム全体、Downloads、Dropbox、共有ディレクトリは指定しません。
 
-- Codex: `notebooklm-audio`
-- Claude Code: `notebooklm-audio`
-
-片方だけの場合は `./scripts/install.sh --codex` または `./scripts/install.sh --claude` を使います。登録先はこのフォルダの `scripts/mcp-launcher.sh` です。ランチャーは許可済み音声ルートとNode実行ファイルを固定して `dist/index.js` を起動します。移動・削除すると再登録が必要になります。
-
-登録を行う場合、インストーラは先に指定された全CLI、音声ルート、Node/npmを検証してから設定を変更します。既存の `notebooklm-audio` を置換する途中で失敗した場合は、Codex/Claudeの元のユーザー設定を復元します。登録成功後にも `mcp get notebooklm-audio` を読み戻して確認します。CLI独自の保存先を変更している場合は、`CODEX_CONFIG_FILE` / `CLAUDE_CONFIG_FILE` に該当ファイルを指定してください。
+管理対象のMCP名はカスタム版 `notebooklm-audio` と予約名 `notebooklm` です。
+任意の別名エイリアスは自動棚卸しできないため、競合する場合はセットアップ前に
+手動で削除してください。予約名の競合や識別不能な登録があればbootstrapは安全に
+停止し、認証データ、Chromeプロファイル、無関係なMCP登録は削除しません。
+インストール成功後は、登録されたCodex／Claude Codeをすべて再起動してください。
 
 ## 初回Google認証
 
@@ -64,7 +57,7 @@ notebooklm-audio の setup_auth を show_browser=true で実行して
 
 Googleログインと2段階認証を完了します。以後、CookieとChromeプロファイルはOSごとのアプリデータ領域に保存され、CodexとClaudeは同一OSユーザーであれば共用します。
 
-`setup_auth` は既存の認証状態を保持したまま可視ブラウザを開きます。現在 `re_auth` は安全な段階Profile切替が未実装のため、既存の認証を変更せず fail-closed で終了します。アカウントを分ける場合は別OSユーザーまたは `NOTEBOOKLM_ACCOUNT` の別データ領域を使用してください。
+`setup_auth` は既存の認証情報を意図的に削除しませんが、対話ログインにより永続プロファイルやセッションが更新されるため、状態保持は保証しません。現在 `re_auth` は安全な段階Profile切替が未実装のため、既存の認証を変更せず fail-closed で終了します。アカウントを分ける場合は別OSユーザーまたは `NOTEBOOKLM_ACCOUNT` の別データ領域を使用してください。
 
 | OS | プロファイル保存先 |
 |---|---|
@@ -111,25 +104,22 @@ HEADLESS=true ./scripts/start-http.sh
 
 既定値は `127.0.0.1:3000` です。外部公開する場合も、MCPを直接インターネットに晒さず、Tailscaleまたは認証付きのリバースプロキシを別途用意してください。
 
+ランチャーの非公開 `.audio-roots.env` は、stdio向けの旧2キー形式 `NOTEBOOKLM_NODE_BIN` と `NOTEBOOKLM_AUDIO_ROOTS` を受け付けます。stdioはネットワーク待受を開かないためBearer tokenは任意ですが、HTTP起動には `NOTEBOOKLM_HTTP_BEARER_TOKEN` が必須です。インストーラはtokenを含む現行3キー形式を安全に移行・書込みできます。ファイルを手編集したりtokenを表示・共有したりしないでください。
+
 現時点ではブラウザ表示設定など一部の実行設定がプロセス全体で共有されます。そのため、1プロセスを高並列ワーカーとして使うより、音声アップロードと認証を直列キューにし、必要なら信頼境界ごとに別プロセスを起動する運用が安全です。また、アップロード前に実パス・拡張子・先頭バイトを検証していますが、検証後に同じパスのファイルが外部から差し替えられるTOCTOUリスクを完全には除去できません。許可音声ルートは受信専用・単一サービスユーザー書込にしてください。
 
 ## 更新
 
-上流との差分を安全に確認します。
+利用者は更新時もこのforkのレビュー済みリリースだけを導入します。インストール時に上流の最新版を取得・結合することはありません。「レビュー済み最新」は、当該forkリリースの公開前にメンテナーが選定・統合・テストした上流状態を意味します。正確な基点は `RELEASE_PROVENANCE.json` を確認してください。
 
-```bash
-./scripts/update-upstream.sh
-```
+上流追従はメンテナーのリリース作業です。Gitチェックアウトから `scripts/update-upstream.sh` を使って差分をレビューし、カスタム音声機能を保った上で、全検証・実機smoke・レビュー承認を経て新しいforkリリースを公開します。source-onlyアーカイブには `.git` がないため、上流追従には使用しません。
 
-表示された差分をレビューし、作業ツリーが空であることを確認してからのみマージします。
-
-```bash
-./scripts/update-upstream.sh --apply
-```
-
-`--apply` はマージ後に `npm ci`、`npm run check`、完全な `npm test`、配布manifestの再生成・検証を順に実行し、いずれかが失敗すれば非0で停止します。その後、必ず `./scripts/doctor.sh` を実行し、`add_audio_source` を可視ブラウザで1ファイル検証してください。NotebookLMのUI変更でアップロードが失敗した場合は、`show_browser=true` で画面を確認し、`src/notebooklm/selectors.ts` の音声アップロード選択子を更新します。マージ後にこれらの検証が失敗しても、リポジトリはマージ済みの状態のままです。自動の `reset`／巻き戻しは行いません。失敗内容をレビューし、修正コミットまたは明示的にレビューしたロールバックを選んでください。
-
-上流更新はGitチェックアウトでのみ実行できます。source-onlyアーカイブには `.git` がないため、そこで `update-upstream.sh` は実行できません。上流リモート名は `upstream` があればそれを、なければ `origin` を使います。別名の場合は `NOTEBOOKLM_UPSTREAM_REMOTE`、対象ブランチは `NOTEBOOKLM_UPSTREAM_BRANCH` で指定できます。配布用のsource-onlyアーカイブは `./scripts/make-source-release.sh` で生成できます。
+このリリースでは、レビュー済み上流コミットを示すfork側の監査タグ
+`upstream/notebooklm/v2.0.0`（完全なrefは
+`refs/tags/upstream/notebooklm/v2.0.0`）も、カスタム `v0.0.3` タグと同時に
+pushします。今後のレビュー済み統合も `upstream/notebooklm/vX.Y.Z` 形式を
+使います。updaterはレビュー候補の準備だけを行い、タグ作成・push・merge・
+リリース公開を自動実行しません。
 
 ## よくある問題
 

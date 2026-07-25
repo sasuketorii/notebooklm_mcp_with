@@ -1,6 +1,6 @@
 # Usage Guide
 
-Practical end-to-end walkthroughs for custom version 0.0.2. Each section is a self-contained recipe with the exact tool calls / curl commands. The upstream base is recorded in `RELEASE_PROVENANCE.json`.
+Practical end-to-end walkthroughs for custom version 0.0.3. Each section is a self-contained recipe with the exact tool calls / curl commands. The upstream base is recorded in `RELEASE_PROVENANCE.json`.
 
 - [First-time setup](#first-time-setup)
 - [Multi-turn session pattern](#multi-turn-session-pattern)
@@ -15,12 +15,10 @@ Practical end-to-end walkthroughs for custom version 0.0.2. Each section is a se
 
 ### 1. Install and start
 
-Install this checkout and register its launcher (the custom tools are not in the upstream npm package):
+Give the checkout URL to Codex or Claude Code and use the supported one-prompt bootstrap:
 
 ```bash
-mkdir -p "$HOME/notebooklm-audio-inbox"
-./scripts/install.sh --all --audio-root "$HOME/notebooklm-audio-inbox"
-./scripts/mcp-launcher.sh
+./scripts/bootstrap.sh --auto
 ```
 
 Wire it into your MCP client of choice (see the [README](../README.md#install-and-register)).
@@ -30,7 +28,7 @@ Wire it into your MCP client of choice (see the [README](../README.md#install-an
 Call `setup_auth`. A Chrome window opens. Log in to the Google account that owns the NotebookLM notebooks you want to query. Close the browser when done.
 
 ```json
-{ "name": "setup_auth", "arguments": {} }
+{ "name": "setup_auth", "arguments": { "show_browser": true } }
 ```
 
 Verify:

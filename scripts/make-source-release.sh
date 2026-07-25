@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build an install-only source archive. Authentication, audio, dependencies,
+# Build an audit-only source archive. Authentication, audio, dependencies,
 # build output and .git are excluded; use a Git checkout to follow upstream.
 set -euo pipefail
 
@@ -10,7 +10,7 @@ cd "$ROOT_DIR"
 ./scripts/generate-manifest.sh
 ./scripts/verify-manifest.sh
 
-files=(package.json package-lock.json README.md SETUP_JA.md RELEASE_PROVENANCE.json LICENSE tsconfig.json eslint.config.js .prettierrc.json .prettierignore .gitignore CHANGELOG.md DIST_MANIFEST.sha256 src docs scripts)
+files=(AGENTS.md CLAUDE.md CUSTOM_TOOL_CONTRACTS.json TRUSTED_RELEASES.json UPSTREAM_BASELINE.json package.json package-lock.json README.md SETUP_JA.md RELEASE_PROVENANCE.json LICENSE tsconfig.json eslint.config.js .prettierrc.json .prettierignore .gitignore CHANGELOG.md DIST_MANIFEST.sha256 .github src docs scripts)
 ARCHIVE_ROOT="notebooklm-mcp-audio-custom"
 STAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/notebooklm-mcp-audio-release.XXXXXX")"
 trap 'rm -rf -- "$STAGE_DIR"' EXIT
@@ -42,7 +42,7 @@ if ! tar -tzf "$OUTPUT" | awk -v prefix="$ARCHIVE_ROOT/" 'index($0, prefix) != 1
   exit 1
 fi
 
-# Keep the release portable and install-only. Reject metadata and any
+# Keep the audit artifact portable and install-independent. Reject metadata and any
 # authentication, generated, dependency, or build-output paths fail-closed.
 if ! tar -tzf "$OUTPUT" | awk '
   {

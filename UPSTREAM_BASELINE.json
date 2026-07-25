@@ -1,0 +1,614 @@
+{
+  "contractSha256": "1076d8d9bca03f358faf238d47bb9f3b3dbeaead06712e1a1d409f9e3786564e",
+  "formatVersion": 1,
+  "lineageRoot": {
+    "graftCommit": "0c2217afec126dc395f673986ee398c264e83df5",
+    "preservedTree": "30317f6b557a2f9b1f527726b973687c2fca1ed9",
+    "publicParent": "aa7d45935a236cd4824fb74a9890b556a17eb1b3",
+    "upstreamParent": "50b3e7f67f8535d9899c5e2b1b68f37d17b72aef"
+  },
+  "normalization": {
+    "capabilityAnnotations": [
+      "readOnlyHint",
+      "destructiveHint",
+      "idempotentHint",
+      "openWorldHint"
+    ],
+    "capabilityCompatibility": "Exact match or monotonic safety improvement: readOnly/idempotent false-to-true; destructive/openWorld true-to-false.",
+    "ignoredSchemaKeys": [
+      "description",
+      "title"
+    ]
+  },
+  "toolCount": 20,
+  "tools": [
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "content_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "topics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "url": {
+            "type": "string"
+          },
+          "use_cases": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "description",
+          "name",
+          "topics",
+          "url"
+        ],
+        "type": "object"
+      },
+      "name": "add_notebook"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "notebook_id": {
+            "type": "string"
+          },
+          "notebook_url": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "show_browser": {
+            "type": "boolean"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "text",
+              "url"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "content",
+          "type"
+        ],
+        "type": "object"
+      },
+      "name": "add_source"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "browser_options": {
+            "properties": {
+              "headless": {
+                "type": "boolean"
+              },
+              "show": {
+                "type": "boolean"
+              },
+              "stealth": {
+                "properties": {
+                  "delay_max_ms": {
+                    "type": "number"
+                  },
+                  "delay_min_ms": {
+                    "type": "number"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "human_typing": {
+                    "type": "boolean"
+                  },
+                  "mouse_movements": {
+                    "type": "boolean"
+                  },
+                  "random_delays": {
+                    "type": "boolean"
+                  },
+                  "typing_wpm_max": {
+                    "type": "number"
+                  },
+                  "typing_wpm_min": {
+                    "type": "number"
+                  }
+                },
+                "type": "object"
+              },
+              "timeout_ms": {
+                "type": "number"
+              },
+              "viewport": {
+                "properties": {
+                  "height": {
+                    "type": "number"
+                  },
+                  "width": {
+                    "type": "number"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "type": "object"
+          },
+          "notebook_id": {
+            "type": "string"
+          },
+          "notebook_url": {
+            "type": "string"
+          },
+          "question": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "show_browser": {
+            "type": "boolean"
+          },
+          "source_format": {
+            "enum": [
+              "footnotes",
+              "inline",
+              "json",
+              "none"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "type": "object"
+      },
+      "name": "ask_question"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
+          "preserve_library": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "cleanup_data"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "name": "close_session"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "destination_dir": {
+            "type": "string"
+          },
+          "notebook_id": {
+            "type": "string"
+          },
+          "notebook_url": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "show_browser": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "destination_dir"
+        ],
+        "type": "object"
+      },
+      "name": "download_audio"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "custom_prompt": {
+            "type": "string"
+          },
+          "notebook_id": {
+            "type": "string"
+          },
+          "notebook_url": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "show_browser": {
+            "type": "boolean"
+          },
+          "timeout_ms": {
+            "type": "number"
+          },
+          "wait_for_completion": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "name": "generate_audio"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "notebook_id": {
+            "type": "string"
+          },
+          "notebook_url": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "show_browser": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "name": "get_audio_status"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "get_health"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "get_library_stats"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "name": "get_notebook"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "list_notebooks"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "list_sessions"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "browser_options": {
+            "properties": {
+              "headless": {
+                "type": "boolean"
+              },
+              "show": {
+                "type": "boolean"
+              },
+              "timeout_ms": {
+                "type": "number"
+              }
+            },
+            "type": "object"
+          },
+          "show_browser": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "name": "re_auth"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "name": "remove_notebook"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "name": "reset_session"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "name": "search_notebooks"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "name": "select_notebook"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "browser_options": {
+            "properties": {
+              "headless": {
+                "type": "boolean"
+              },
+              "show": {
+                "type": "boolean"
+              },
+              "timeout_ms": {
+                "type": "number"
+              }
+            },
+            "type": "object"
+          },
+          "show_browser": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "name": "setup_auth"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "content_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "topics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "url": {
+            "type": "string"
+          },
+          "use_cases": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "name": "update_notebook"
+    }
+  ],
+  "upstream": {
+    "auditTagRef": "refs/tags/upstream/notebooklm/v2.0.0",
+    "commit": "50b3e7f67f8535d9899c5e2b1b68f37d17b72aef",
+    "repository": "https://github.com/PleasePrompto/notebooklm-mcp.git",
+    "tag": "v2.0.0",
+    "tree": "d8b3dafcb6b8b3ae9a93ecb35122d734f035bb68"
+  }
+}

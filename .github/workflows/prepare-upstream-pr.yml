@@ -1,0 +1,92 @@
+name: Prepare Upstream Integration PR
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: "Exact stable upstream tag (for example v2.0.0)"
+        required: true
+        type: string
+      upstream_sha:
+        description: "Exact 40-character commit SHA that the tag resolves to"
+        required: true
+        type: string
+
+# The only write capabilities are the branch and its reviewable pull request.
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: prepare-upstream-integration
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the trusted dispatch revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact upstream provenance and create a review branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+          UPSTREAM_SHA: ${{ inputs.upstream_sha }}
+          UPSTREAM_URL: https://github.com/PleasePrompto/notebooklm-mcp.git
+          BASE_SHA: ${{ github.sha }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Only stable, conventional tags and canonical 40-character commit IDs are accepted.
+          [[ "$UPSTREAM_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "upstream_tag must be an exact stable vX.Y.Z tag" >&2; exit 2; }
+          [[ "$UPSTREAM_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "upstream_sha must be a lowercase 40-character SHA" >&2; exit 2; }
+
+          tag_ref="$(git ls-remote --refs "$UPSTREAM_URL" "refs/tags/$UPSTREAM_TAG")"
+          [[ -n "$tag_ref" ]] || { echo "upstream tag was not found" >&2; exit 1; }
+          tag_object="${tag_ref%%$'\t'*}"
+          peeled_ref="$(git ls-remote "$UPSTREAM_URL" "refs/tags/$UPSTREAM_TAG^{}")"
+          if [[ -n "$peeled_ref" ]]; then
+            resolved_sha="${peeled_ref%%$'\t'*}"
+          else
+            resolved_sha="$tag_object"
+          fi
+          [[ "$resolved_sha" == "$UPSTREAM_SHA" ]] || { echo "tag does not resolve to the supplied SHA" >&2; exit 1; }
+
+          branch="automation/upstream-$UPSTREAM_TAG"
+          if git ls-remote --exit-code --heads origin "refs/heads/$branch" >/dev/null 2>&1; then
+            echo "A branch for this tag already exists; refusing to overwrite it." >&2
+            exit 1
+          fi
+
+          # Fetching and merging transfers Git objects only. No upstream npm, shell, or project code is executed.
+          git fetch --no-tags "$UPSTREAM_URL" "$UPSTREAM_SHA"
+          [[ "$(git rev-parse FETCH_HEAD^{commit})" == "$UPSTREAM_SHA" ]] || { echo "fetched object did not match supplied SHA" >&2; exit 1; }
+          git checkout -b "$branch" "$BASE_SHA"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git merge-base --is-ancestor "$UPSTREAM_SHA" HEAD; then
+            echo "Upstream commit is already integrated; no pull request created."
+            exit 0
+          fi
+          if ! git -c core.hooksPath=/dev/null merge --no-commit --no-ff "$UPSTREAM_SHA"; then
+            git merge --abort || true
+            echo "Integration conflicts require a maintainer to resolve them locally." >&2
+            exit 1
+          fi
+          git commit --no-verify -m "chore(upstream): integrate $UPSTREAM_TAG"
+          # Checkout intentionally did not persist credentials. Supply the short-lived workflow token
+          # only to this one Git process, and disable hooks as an additional non-execution boundary.
+          push_auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          git -c core.hooksPath=/dev/null -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $push_auth" push origin "$branch"
+          unset push_auth
+          gh pr create \
+            --repo "$REPOSITORY" \
+            --base main \
+            --head "$branch" \
+            --title "chore(upstream): integrate $UPSTREAM_TAG" \
+            --body "Automated preparation only. Upstream tag: \`$UPSTREAM_TAG\`\\nResolved commit: \`$UPSTREAM_SHA\`\\n\\nNo upstream project code or dependency lifecycle scripts were executed by this workflow. Review, test, and merge manually."

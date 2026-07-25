@@ -23,8 +23,11 @@ fi
 ENV_FILE="$ROOT_DIR/.audio-roots.env"
 if [[ -f "$ENV_FILE" ]]; then
   # shellcheck disable=SC1090
-  source "$ENV_FILE"
-  if [[ -x "${NOTEBOOKLM_NODE_BIN:-}" ]]; then
+  source "$ROOT_DIR/scripts/read-private-env.sh"
+  if ! private_env_load "$ENV_FILE"; then
+    echo "FAIL  invalid private launcher environment" >&2
+    failures=$((failures + 1))
+  elif [[ -x "${NOTEBOOKLM_NODE_BIN:-}" ]]; then
     if "$NOTEBOOKLM_NODE_BIN" -e 'const [major,minor]=process.versions.node.split(".").map(Number);process.exit(major>22||(major===22&&minor>=13)?0:1)'; then
       echo "OK    launcher Node: $NOTEBOOKLM_NODE_BIN"
     else
@@ -33,7 +36,10 @@ if [[ -f "$ENV_FILE" ]]; then
   else
     echo "FAIL  configured launcher Node is missing" >&2; failures=$((failures + 1))
   fi
-  [[ -n "${NOTEBOOKLM_AUDIO_ROOTS:-}" ]] || { echo "FAIL  no configured audio roots" >&2; failures=$((failures + 1)); }
+  if [[ -z "${NOTEBOOKLM_AUDIO_ROOTS:-}" ]]; then
+    echo "FAIL  no configured audio roots" >&2
+    failures=$((failures + 1))
+  fi
 else
   echo "INFO  no launcher environment; registration has not been configured"
 fi

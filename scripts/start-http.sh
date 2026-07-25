@@ -9,19 +9,21 @@ PORT="${NOTEBOOKLM_PORT:-3000}"
 
 [[ -x "$ROOT_DIR/dist/index.js" ]] || { echo "Build missing. Run ./scripts/install.sh first." >&2; exit 1; }
 ENV_FILE="$ROOT_DIR/.audio-roots.env"
-[[ -f "$ENV_FILE" ]] || { echo "Missing .audio-roots.env; rerun install.sh with --audio-root." >&2; exit 1; }
 # Preserve a non-empty caller-provided token before sourcing the private env
 # file; ambient credentials intentionally take precedence over file defaults.
 AMBIENT_HTTP_BEARER_TOKEN="${NOTEBOOKLM_HTTP_BEARER_TOKEN-}"
 # shellcheck disable=SC1090
-source "$ENV_FILE"
+source "$ROOT_DIR/scripts/read-private-env.sh"
+private_env_load "$ENV_FILE"
 if [[ -n "$AMBIENT_HTTP_BEARER_TOKEN" ]]; then
   NOTEBOOKLM_HTTP_BEARER_TOKEN="$AMBIENT_HTTP_BEARER_TOKEN"
 fi
 [[ -x "${NOTEBOOKLM_NODE_BIN:-}" ]] || { echo "Configured Node binary is missing; rerun install.sh." >&2; exit 1; }
 [[ -n "${NOTEBOOKLM_AUDIO_ROOTS:-}" ]] || { echo "No audio roots configured; rerun install.sh." >&2; exit 1; }
 HTTP_BEARER_TOKEN="${NOTEBOOKLM_HTTP_BEARER_TOKEN-}"
-[[ ${#HTTP_BEARER_TOKEN} -ge 32 ]] || { echo "NOTEBOOKLM_HTTP_BEARER_TOKEN must be at least 32 bytes; rerun install.sh." >&2; exit 1; }
+[[ ${#HTTP_BEARER_TOKEN} -ge 32 && ${#HTTP_BEARER_TOKEN} -le 512 &&
+   "$HTTP_BEARER_TOKEN" =~ ^[A-Za-z0-9._~-]+$ ]] ||
+  { echo "NOTEBOOKLM_HTTP_BEARER_TOKEN must be 32-512 safe ASCII bytes; rerun install.sh." >&2; exit 1; }
 # Values loaded from a shell file are not automatically inherited by exec'd
 # processes. Export the generated launcher contract to the HTTP server too.
 export NOTEBOOKLM_NODE_BIN NOTEBOOKLM_AUDIO_ROOTS NOTEBOOKLM_HTTP_BEARER_TOKEN="$HTTP_BEARER_TOKEN"
