@@ -60,7 +60,8 @@ jobs:
             remote_tag_sha="$tag_object"
           fi
           [[ "$remote_tag_sha" == "$RELEASE_SHA" ]] || { echo "origin release tag does not resolve to the supplied SHA" >&2; exit 1; }
-          [[ "$(node -p \"require('./package.json').version\")" == "${RELEASE_REF#v}" ]] || { echo "tag and package version differ" >&2; exit 1; }
+          package_version="$(node -p "require('./package.json').version")"
+          [[ "$package_version" == "${RELEASE_REF#v}" ]] || { echo "tag and package version differ" >&2; exit 1; }
       - name: Validate trusted release history
         env:
           RELEASE_REF: ${{ inputs.ref }}
