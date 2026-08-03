@@ -1,6 +1,6 @@
 {
   "name": "notebooklm-mcp-audio-custom",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "MCP server for Google NotebookLM — chat, source ingestion, audio overviews, citations, stdio + Streamable-HTTP transports.",
   "type": "module",
   "bin": {

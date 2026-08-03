@@ -1,2 +1,2 @@
 export const SERVER_NAME = "notebooklm-mcp-audio-custom";
-export const SERVER_VERSION = "0.0.6";
+export const SERVER_VERSION = "0.0.7";

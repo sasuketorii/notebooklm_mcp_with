@@ -113,12 +113,13 @@ behavior, runs the full verification suite, obtains review approval, and
 publishes a new fork release. Users update by installing a reviewed release of
 this fork only.
 
-The v0.0.6 release also carries the fork-owned audit tag
+The v0.0.7 release retains the fork-owned audit tag
 `refs/tags/upstream/notebooklm/v2.0.0`, already public on `origin` at the
-reviewed immutable SHA. The release push for v0.0.6 contains only `main` and
-the custom `v0.0.6` tag. Future reviewed integrations use
-`upstream/notebooklm/vX.Y.Z`. `scripts/update-upstream.sh` prepares and checks a
-candidate only; it never creates or pushes tags, merges, or publishes releases.
+reviewed immutable SHA. That existing audit tag is unchanged and is not pushed
+again; the release push for v0.0.7 contains only `main` and the custom `v0.0.7`
+tag. Future reviewed integrations use `upstream/notebooklm/vX.Y.Z`.
+`scripts/update-upstream.sh` prepares and checks a candidate only; it never
+creates or pushes tags, merges, or publishes releases.
 
 For user-facing operational detail, see the root README and
 [`SETUP_JA.md`](../SETUP_JA.md). For source, capability, and safety limits, see

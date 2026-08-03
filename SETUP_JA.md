@@ -114,11 +114,11 @@ HEADLESS=true ./scripts/start-http.sh
 
 上流追従はメンテナーのリリース作業です。Gitチェックアウトから `scripts/update-upstream.sh` を使って差分をレビューし、カスタム音声機能を保った上で、全検証・実機smoke・レビュー承認を経て新しいforkリリースを公開します。source-onlyアーカイブには `.git` がないため、上流追従には使用しません。
 
-このリリースでは、レビュー済み上流コミットを示すfork側の監査タグ
+このリリースでも、レビュー済み上流コミットを示すfork側の監査タグ
 `upstream/notebooklm/v2.0.0`（完全なrefは
 `refs/tags/upstream/notebooklm/v2.0.0`）は、レビュー済みの不変SHAで
-originに公開済みです。今回のrelease push対象は `main` とカスタム
-`v0.0.6` タグだけです。今後のレビュー済み統合も
+originに公開済みのままです。今回この監査タグを再pushせず、release push
+対象は `main` とカスタム `v0.0.7` タグだけです。今後のレビュー済み統合も
 `upstream/notebooklm/vX.Y.Z` 形式を使います。updaterはレビュー候補の準備だけを行い、タグ作成・push・merge・
 リリース公開を自動実行しません。
 

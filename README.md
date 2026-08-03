@@ -118,13 +118,14 @@ End users never merge upstream code at installation time. Each published fork re
 
 Maintainers use [`scripts/update-upstream.sh`](./scripts/update-upstream.sh) from a Git checkout, review the diff, preserve the custom audio workflow, run the full verification suite, obtain review approval, and publish a new fork release. Source-only archives have no `.git` and cannot perform upstream tracking.
 
-For this release, the reviewed upstream commit is also recorded by the durable
+For this release, the reviewed upstream commit remains recorded by the durable
 fork audit tag `upstream/notebooklm/v2.0.0` (full ref:
 `refs/tags/upstream/notebooklm/v2.0.0`). That audit tag is already public on
-`origin` with the reviewed, immutable SHA; this release push contains only
-`main` and the custom `v0.0.6` tag. Future reviewed integrations use the same
-`upstream/notebooklm/vX.Y.Z` convention. The updater only prepares a review
-candidate: it never creates or pushes tags, merges code, or publishes releases.
+`origin` at the reviewed, immutable SHA and is unchanged; this release push
+contains only `main` and the custom `v0.0.7` tag. Future reviewed integrations
+use the same `upstream/notebooklm/vX.Y.Z` convention. The updater only prepares
+a review candidate: it never creates or pushes tags, merges code, or publishes
+releases.
 
 利用者はインストール時に上流をマージしません。各forkリリースはレビュー済み上流基点を `RELEASE_PROVENANCE.json` に記録します。「release時点でレビュー済み最新」とは、公開時に選定・統合・検証した上流状態を指し、利用時に上流最新版を自動取得・結合する意味ではありません。上流追従はメンテナーがレビューと検証を経て新しいforkリリースとして公開します。
 

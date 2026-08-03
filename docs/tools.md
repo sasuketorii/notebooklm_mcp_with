@@ -1,6 +1,6 @@
 # Tools
 
-Every tool registered in custom version 0.0.6, with parameter schema, examples, return envelopes, bounds, and readiness/provenance caveats.
+Every tool registered in custom version 0.0.7, with parameter schema, examples, return envelopes, bounds, and readiness/provenance caveats.
 
 The server returns each tool result wrapped as `{ "success": true, "data": <object> }` (or `{ "success": false, "error": <string> }`). The shapes below describe the inner `data`.
 
