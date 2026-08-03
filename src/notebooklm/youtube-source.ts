@@ -1,4 +1,5 @@
 import type { Page } from "patchright";
+import { NOTEBOOKLM_APP_ORIGIN } from "./notebook-host.js";
 import { Selectors } from "./selectors.js";
 import { countSources } from "./sources.js";
 import { safeSleep } from "../browser/watchdog.js";
@@ -257,7 +258,7 @@ async function verifyYoutubeIdentity(
           .first()
           .getAttribute("src")
           .catch(() => null);
-        const parsed = src ? new URL(src, "https://notebooklm.google.com") : null;
+        const parsed = src ? new URL(src, NOTEBOOKLM_APP_ORIGIN) : null;
         const pathId = parsed?.pathname.match(/\/embed\/([A-Za-z0-9_-]{11})/)?.[1];
         const titleEl = viewer.locator("#source-title[title]");
         const hydratedTitle = await titleEl.getAttribute("title").catch(() => null);

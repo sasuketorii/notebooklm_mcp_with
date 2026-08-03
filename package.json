@@ -1,6 +1,6 @@
 {
   "name": "notebooklm-mcp-audio-custom",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "MCP server for Google NotebookLM — chat, source ingestion, audio overviews, citations, stdio + Streamable-HTTP transports.",
   "type": "module",
   "bin": {
@@ -12,7 +12,7 @@
     "watch": "tsc --watch",
     "dev": "tsx watch src/index.ts",
     "prepare": "npm run build",
-    "test": "npm run test:workflow-security && npm run test:lineage && npm run test:trusted-releases && npm run test:install-release && npm run test:auth-persistence && npm run test:tool-compatibility && npm run test:audio && npm run test:http && npm run test:core && npm run test:permissions && npm run test:launcher && npm run test:installer && npm run test:youtube && npm run test:readiness && npm run test:transcript && npm run test:workflow && npm run test:chat && npm run test:source-release",
+    "test": "npm run test:workflow-security && npm run test:lineage && npm run test:trusted-releases && npm run test:install-release && npm run test:auth-persistence && npm run test:tool-compatibility && npm run test:hosts && npm run test:audio && npm run test:http && npm run test:core && npm run test:permissions && npm run test:launcher && npm run test:installer && npm run test:youtube && npm run test:readiness && npm run test:transcript && npm run test:workflow && npm run test:chat && npm run test:source-release",
     "test:auth-persistence": "npm run build && node scripts/test-auth-persistence.mjs",
     "test:source-release": "bash scripts/test-source-release.sh",
     "test:youtube": "node scripts/test-youtube-source.mjs",
@@ -21,6 +21,7 @@
     "test:workflow": "node scripts/test-workflow-integration.mjs",
     "test:chat": "npm run build && node scripts/test-chat-stability.mjs",
     "test:audio": "npm run build && node scripts/test-audio-validation.mjs",
+    "test:hosts": "npm run build && node scripts/test-notebook-hosts.mjs",
     "test:http": "npm run build && node scripts/test-http-concurrency.mjs",
     "test:core": "npm run build && node scripts/test-core-concurrency.mjs",
     "test:permissions": "npm run build && node scripts/test-auth-permissions.mjs",

@@ -1,6 +1,6 @@
 # Troubleshooting
 
-A symptom → fix matrix for custom version 0.0.5. For the full env-var inventory, see [`configuration.md`](./configuration.md). The upstream base is recorded in `RELEASE_PROVENANCE.json`.
+A symptom → fix matrix for custom version 0.0.6. For the full env-var inventory, see [`configuration.md`](./configuration.md). The upstream base is recorded in `RELEASE_PROVENANCE.json`.
 
 ## Chrome fails to launch (macOS Tahoe / Windows exit 21)
 

@@ -25,6 +25,10 @@ import {
 } from "./auth-persistence.js";
 import type { BaseProfileLeaseHandle } from "./auth-persistence.js";
 import { CONFIG, NOTEBOOKLM_AUTH_URL } from "../config.js";
+import {
+  classifyNotebookLmAppUrl,
+  isNotebookLmAuthDestination,
+} from "../notebooklm/notebook-host.js";
 import { log } from "../utils/logger.js";
 import {
   getPreferredChannel,
@@ -205,7 +209,7 @@ export class AuthManager {
    * Perform interactive login
    * User will see a browser window and login manually
    *
-   * SIMPLE & RELIABLE: Just wait for URL to change to notebooklm.google.com
+   * Wait for a redirect to either official NotebookLM application host.
    */
   async performLogin(page: Page, sendProgress?: ProgressCallback): Promise<boolean> {
     try {
@@ -246,8 +250,7 @@ export class AuthManager {
             );
           }
 
-          // ✅ SIMPLE: Check if we're on NotebookLM (any path!)
-          if (currentUrl.startsWith("https://notebooklm.google.com/")) {
+          if (await this.hasAuthenticatedNotebookDestination(page, currentUrl)) {
             await sendProgress?.("Login successful! NotebookLM detected!", 9, 10);
             log.success("✅ Login successful! NotebookLM URL detected.");
             log.success(`✅ Current URL: ${currentUrl}`);
@@ -271,7 +274,7 @@ export class AuthManager {
 
       // Timeout reached - final check
       const currentUrl = page.url();
-      if (currentUrl.startsWith("https://notebooklm.google.com/")) {
+      if (await this.hasAuthenticatedNotebookDestination(page, currentUrl)) {
         await sendProgress?.("Login successful (detected on timeout check)!", 9, 10);
         log.success("✅ Login successful (detected on timeout check)");
         return true;
@@ -409,9 +412,13 @@ export class AuthManager {
       } else {
         log.error(`  ❌ Stuck on Google accounts page: ${currentUrl.slice(0, 80)}...`);
       }
-    } else if (currentUrl.includes("notebooklm.google.com")) {
-      log.warning("  ⚠️  Reached NotebookLM but couldn't detect successful login");
-      log.info("  💡 This might be a timing issue - try again");
+    } else if (isNotebookLmAuthDestination(currentUrl)) {
+      log.warning("  ⚠️  Reached a NotebookLM destination without valid live auth evidence");
+      log.info("  💡 Wait for Google authentication to complete, then try again");
+    } else if (classifyNotebookLmAppUrl(currentUrl)) {
+      log.error(
+        "  ❌ Reached an official NotebookLM page that is not an authenticated destination"
+      );
     } else {
       log.error(`  ❌ Unexpected page: ${currentUrl.slice(0, 80)}...`);
     }
@@ -426,8 +433,7 @@ export class AuthManager {
   /**
    * Wait for Google to redirect to NotebookLM after successful login (SIMPLE & RELIABLE)
    *
-   * Just checks if URL changes to notebooklm.google.com - no complex UI element searching!
-   * Matches the simplified approach used in performLogin().
+   * Requires a narrow official destination and live critical-cookie evidence.
    */
   private async waitForRedirectAfterLogin(page: Page, deadline: number): Promise<boolean> {
     log.info("    ⏳ Waiting for redirect to NotebookLM...");
@@ -436,8 +442,7 @@ export class AuthManager {
       try {
         const currentUrl = page.url();
 
-        // Simple check: Are we on NotebookLM?
-        if (currentUrl.startsWith("https://notebooklm.google.com/")) {
+        if (await this.hasAuthenticatedNotebookDestination(page, currentUrl)) {
           log.success("    ✅ NotebookLM URL detected!");
           // Short wait to ensure page is loaded
           await page.waitForTimeout(2000);
@@ -457,8 +462,7 @@ export class AuthManager {
   /**
    * Wait for NotebookLM to load (SIMPLE & RELIABLE)
    *
-   * Just checks if URL starts with notebooklm.google.com - no complex UI element searching!
-   * Matches the simplified approach used in performLogin().
+   * Requires a narrow official destination and live critical-cookie evidence.
    */
   private async waitForNotebook(page: Page, timeoutMs: number): Promise<boolean> {
     const endTime = Date.now() + timeoutMs;
@@ -467,8 +471,7 @@ export class AuthManager {
       try {
         const currentUrl = page.url();
 
-        // Simple check: Are we on NotebookLM?
-        if (currentUrl.startsWith("https://notebooklm.google.com/")) {
+        if (await this.hasAuthenticatedNotebookDestination(page, currentUrl)) {
           log.success("  ✅ NotebookLM URL detected");
           return true;
         }
@@ -480,6 +483,19 @@ export class AuthManager {
     }
 
     return false;
+  }
+
+  private async hasAuthenticatedNotebookDestination(
+    page: Page,
+    currentUrl: string
+  ): Promise<boolean> {
+    if (!isNotebookLmAuthDestination(currentUrl)) return false;
+    try {
+      const cookies = await page.context().cookies();
+      return inspectStorageState({ cookies, origins: [] }).bootstrapEligible;
+    } catch {
+      return false;
+    }
   }
 
   /**

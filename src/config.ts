@@ -12,6 +12,7 @@
 import envPaths from "env-paths";
 import fs from "fs";
 import path from "path";
+import { NOTEBOOKLM_APP_URL } from "./notebooklm/notebook-host.js";
 
 // Cross-platform data paths (unified without -nodejs suffix)
 // Linux: ~/.local/share/notebooklm-mcp/
@@ -24,8 +25,11 @@ const paths = envPaths("notebooklm-mcp", { suffix: "" });
  * Google NotebookLM Auth URL (used by setup_auth)
  * This is the base Google login URL that redirects to NotebookLM
  */
-export const NOTEBOOKLM_AUTH_URL =
-  "https://accounts.google.com/v3/signin/identifier?continue=https%3A%2F%2Fnotebooklm.google.com%2F&flowName=GlifWebSignIn&flowEntry=ServiceLogin";
+const authUrl = new URL("https://accounts.google.com/v3/signin/identifier");
+authUrl.searchParams.set("continue", NOTEBOOKLM_APP_URL);
+authUrl.searchParams.set("flowName", "GlifWebSignIn");
+authUrl.searchParams.set("flowEntry", "ServiceLogin");
+export const NOTEBOOKLM_AUTH_URL = authUrl.toString();
 
 export interface Config {
   // NotebookLM - optional, used for legacy default notebook

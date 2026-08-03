@@ -22,7 +22,7 @@ import type { AskQuestionResult, ToolResult, ProgressCallback } from "../types.j
 import { RateLimitError } from "../errors.js";
 import { CleanupManager } from "../utils/cleanup-manager.js";
 import { applyAiMarker, PROVENANCE } from "../utils/disclaimer.js";
-import { assertNotebookLmUrl } from "../notebooklm/notebook-url.js";
+import { assertNotebookLmUrl, getNotebookLmId } from "../notebooklm/notebook-url.js";
 import { validateYouTubeUrl } from "../notebooklm/youtube-source.js";
 import { writeTranscript } from "../notebooklm/transcript-export.js";
 import type { AddYouTubeSourceResult } from "../notebooklm/youtube-source.js";
@@ -911,12 +911,13 @@ export class ToolHandlers {
     const existing = sessionId ? this.sessionManager.getSession(sessionId) : undefined;
     if (existing) {
       const bound = assertNotebookLmUrl(existing.notebookUrl);
-      if (notebookUrl && assertNotebookLmUrl(notebookUrl) !== bound)
+      const boundId = getNotebookLmId(bound);
+      if (notebookUrl && getNotebookLmId(notebookUrl) !== boundId)
         throw new Error("session_id is bound to a different notebook_url");
       if (notebookId) {
         const nb = this.library.getNotebook(notebookId);
         if (!nb) throw new Error(`Notebook not found in library: ${notebookId}`);
-        if (assertNotebookLmUrl(nb.url) !== bound)
+        if (getNotebookLmId(nb.url) !== boundId)
           throw new Error("session_id is bound to a different notebook_id");
       }
       return bound;
@@ -926,7 +927,7 @@ export class ToolHandlers {
       if (notebookId) {
         const nb = this.library.getNotebook(notebookId);
         if (!nb) throw new Error(`Notebook not found in library: ${notebookId}`);
-        if (assertNotebookLmUrl(nb.url) !== direct)
+        if (getNotebookLmId(nb.url) !== getNotebookLmId(direct))
           throw new Error("notebook_id and notebook_url target different notebooks");
       }
       return direct;

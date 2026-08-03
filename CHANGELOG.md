@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.6] - 2026-08-03
+
+### Fixed
+
+- Accepted both official NotebookLM application hosts,
+  `notebook.google.com` and the legacy `notebooklm.google.com`, for auth
+  completion and notebook share URLs while rejecting lookalike, insecure, and
+  credential-bearing URLs.
+- Updated the Google sign-in continuation to the canonical
+  `notebook.google.com` application URL.
+- Added focused built-artifact host compatibility regressions and recorded the
+  reviewed `0.0.5` release in the trusted-release manifest.
+
 ## [0.0.5] - 2026-07-26
 
 ### Fixed

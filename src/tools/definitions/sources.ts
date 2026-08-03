@@ -28,7 +28,7 @@ const sharedNotebookTargeting = {
     description:
       "Direct NotebookLM URL for ad-hoc notebooks. If supplied with `notebook_id`, " +
       "both must resolve to the same known notebook; unknown or mismatched targets fail closed. Format: " +
-      "`https://notebooklm.google.com/notebook/<uuid>`.",
+      "`https://notebook.google.com/notebook/<uuid>` (or legacy `notebooklm.google.com`).",
   },
 };
 

@@ -139,6 +139,18 @@ assert.equal(first, second);
 assert.equal(contextCreates, 1);
 assert.equal(sessionCreates, 1);
 assert.equal(initCalls, 1);
+const sameNotebookDifferentHost = await manager.getOrCreateSession(
+  "same",
+  "https://notebook.google.com/notebook/12345678-1234-1234-1234-123456789012?authuser=1"
+);
+assert.equal(sameNotebookDifferentHost, first);
+assert.equal(sessionCreates, 1);
+const differentNotebook = await manager.getOrCreateSession(
+  "same",
+  "https://notebook.google.com/notebook/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+);
+assert.notEqual(differentNotebook, first);
+assert.equal(sessionCreates, 2);
 await manager.closeAllSessions();
 
 let lifecycleActive = 0;

@@ -122,7 +122,7 @@ For this release, the reviewed upstream commit is also recorded by the durable
 fork audit tag `upstream/notebooklm/v2.0.0` (full ref:
 `refs/tags/upstream/notebooklm/v2.0.0`). That audit tag is already public on
 `origin` with the reviewed, immutable SHA; this release push contains only
-`main` and the custom `v0.0.5` tag. Future reviewed integrations use the same
+`main` and the custom `v0.0.6` tag. Future reviewed integrations use the same
 `upstream/notebooklm/vX.Y.Z` convention. The updater only prepares a review
 candidate: it never creates or pushes tags, merges code, or publishes releases.
 

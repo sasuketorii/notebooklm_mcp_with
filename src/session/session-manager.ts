@@ -19,7 +19,7 @@ import { CONFIG } from "../config.js";
 import { log } from "../utils/logger.js";
 import type { SessionInfo } from "../types.js";
 import { randomBytes } from "crypto";
-import { assertNotebookLmUrl } from "../notebooklm/notebook-url.js";
+import { getNotebookLmId } from "../notebooklm/notebook-url.js";
 
 export interface SessionManagerOptions {
   sharedContextManager?: SharedContextManager;
@@ -95,7 +95,7 @@ export class SessionManager {
     if (!targetUrl) {
       throw new Error("Notebook URL is required to create a session");
     }
-    assertNotebookLmUrl(targetUrl);
+    const targetNotebookId = getNotebookLmId(targetUrl);
 
     // Generate ID if not provided
     if (!sessionId) {
@@ -108,7 +108,10 @@ export class SessionManager {
     // creation and then re-enters normal replacement/mode-change handling.
     const pending = this.pendingCreations.get(sessionId);
     if (pending) {
-      if (pending.notebookUrl === targetUrl && pending.overrideHeadless === overrideHeadless) {
+      if (
+        getNotebookLmId(pending.notebookUrl) === targetNotebookId &&
+        pending.overrideHeadless === overrideHeadless
+      ) {
         return pending.promise;
       }
       await pending.promise.catch(() => undefined);
@@ -176,7 +179,7 @@ export class SessionManager {
     // Return existing session if found
     if (this.sessions.has(sessionId)) {
       const session = this.sessions.get(sessionId)!;
-      if (session.notebookUrl !== targetUrl) {
+      if (getNotebookLmId(session.notebookUrl) !== getNotebookLmId(targetUrl)) {
         log.warning(`♻️  Replacing session ${sessionId} with new notebook URL`);
         try {
           await session.close();
@@ -271,10 +274,11 @@ export class SessionManager {
   }
 
   private async closeSessionsForNotebookUnlocked(url: string): Promise<number> {
+    const notebookId = getNotebookLmId(url);
     let closed = 0;
 
     for (const [sessionId, session] of Array.from(this.sessions.entries())) {
-      if (session.notebookUrl === url) {
+      if (getNotebookLmId(session.notebookUrl) === notebookId) {
         try {
           await session.close();
         } catch (error) {

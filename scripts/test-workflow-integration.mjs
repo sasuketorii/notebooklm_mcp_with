@@ -27,7 +27,13 @@ for (const name of ["wait_for_source_ready", "export_transcript"]) {
 }
 
 // Source readiness envelope: ready, timeout, error and not-found remain distinguishable.
-const row = (name, busy = false, error = false, readyEvidence = true) => ({ name, text: name, busy, error, readyEvidence });
+const row = (name, busy = false, error = false, readyEvidence = true) => ({
+  name,
+  text: name,
+  busy,
+  error,
+  readyEvidence,
+});
 assert.equal(readiness.classifySourceRows([row("S")], ["S"])[0].status, "ready");
 assert.equal(readiness.classifySourceRows([row("S", true)], ["S"])[0].status, "processing");
 assert.equal(readiness.classifySourceRows([row("S", false, true)], ["S"])[0].status, "error");
@@ -51,7 +57,12 @@ assert.ok(profiles.standard.length > 0);
 let creates = 0;
 const fakeSession = {
   notebookUrl: "https://notebooklm.google.com/notebook/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
-  waitForSourceReady: async () => ({ status: "timeout", overall: "timeout", sources: [], limitation: "test" }),
+  waitForSourceReady: async () => ({
+    status: "timeout",
+    overall: "timeout",
+    sources: [],
+    limitation: "test",
+  }),
   // BrowserSession.exportTranscript uses direct source-viewer extraction.
   exportTranscript: async () => ({
     text: "x",
@@ -70,23 +81,64 @@ const fakeSession = {
   }),
 };
 const library = {
-  getNotebook: (id) => id === "same" ? { url: fakeSession.notebookUrl } : id === "other" ? { url: "https://notebooklm.google.com/notebook/ffffffff-ffff-4fff-8fff-ffffffffffff" } : null,
+  getNotebook: (id) =>
+    id === "same"
+      ? { url: fakeSession.notebookUrl }
+      : id === "other"
+        ? { url: "https://notebooklm.google.com/notebook/ffffffff-ffff-4fff-8fff-ffffffffffff" }
+        : null,
   getActiveNotebook: () => null,
 };
 const sessionManager = {
-  getSession: (id) => id === "bound" ? fakeSession : null,
-  getOrCreateSession: async () => { creates += 1; return fakeSession; },
+  getSession: (id) => (id === "bound" ? fakeSession : null),
+  getOrCreateSession: async () => {
+    creates += 1;
+    return fakeSession;
+  },
 };
 const handlers = new ToolHandlers(sessionManager, {}, library);
-assert.equal((await handlers.handleWaitForSourceReady({ notebook_id: "same", notebook_url: "https://notebooklm.google.com/notebook/ffffffff-ffff-4fff-8fff-ffffffffffff" })).success, false);
-assert.equal((await handlers.handleWaitForSourceReady({ notebook_id: "unknown", session_id: "bound" })).success, false);
-assert.equal((await handlers.handleWaitForSourceReady({ session_id: "bound", notebook_url: "https://notebooklm.google.com/notebook/ffffffff-ffff-4fff-8fff-ffffffffffff" })).success, false);
+assert.equal(
+  (
+    await handlers.handleWaitForSourceReady({
+      notebook_id: "same",
+      notebook_url: "https://notebooklm.google.com/notebook/ffffffff-ffff-4fff-8fff-ffffffffffff",
+    })
+  ).success,
+  false
+);
+assert.equal(
+  (await handlers.handleWaitForSourceReady({ notebook_id: "unknown", session_id: "bound" }))
+    .success,
+  false
+);
+assert.equal(
+  (
+    await handlers.handleWaitForSourceReady({
+      session_id: "bound",
+      notebook_url: "https://notebooklm.google.com/notebook/ffffffff-ffff-4fff-8fff-ffffffffffff",
+    })
+  ).success,
+  false
+);
+assert.equal(
+  (
+    await handlers.handleWaitForSourceReady({
+      session_id: "bound",
+      notebook_url:
+        "https://notebook.google.com/notebook/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee?authuser=1",
+    })
+  ).success,
+  true
+);
 const before = creates;
 const boundResult = await handlers.handleWaitForSourceReady({ session_id: "bound" });
 assert.equal(boundResult.success, true);
 assert.equal(boundResult.data.completed, false);
 assert.equal(creates, before + 1);
-const transcriptResult = await handlers.handleExportTranscript({ session_id: "bound", source_name: "S" });
+const transcriptResult = await handlers.handleExportTranscript({
+  session_id: "bound",
+  source_name: "S",
+});
 assert.equal(transcriptResult.success, true);
 assert.equal(transcriptResult.data.completed, true);
 assert.equal(transcriptResult.data.verifiedComplete, false);

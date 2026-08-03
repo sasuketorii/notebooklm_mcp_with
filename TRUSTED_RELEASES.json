@@ -32,6 +32,14 @@
         "RELEASE_PROVENANCE.json": "f87f141188800898de3c331069f288a95d4132bd67c39f89a8f8b57406fcb950",
         "scripts/mcp-launcher.sh": "3c6d5b03e1c1133e3d18d517788e2b87dbfe59b2e19471a4e9bc986b28c9bf6e"
       }
+    },
+    "0.0.5": {
+      "commit": "798513bc08510f257c936d1ddbdd1b935d0c0a0a",
+      "files": {
+        "package.json": "c3e759f0338eb12212bf33e84bcf3118d3a406e85a2471c729709ed8e7cf260f",
+        "RELEASE_PROVENANCE.json": "bee008e0f26e5d7f2734fab24b968dd38a528db1aa2669dbd1bc004cd6ef83c5",
+        "scripts/mcp-launcher.sh": "3c6d5b03e1c1133e3d18d517788e2b87dbfe59b2e19471a4e9bc986b28c9bf6e"
+      }
     }
   },
   "upstreamReleases": {

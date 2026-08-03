@@ -23,7 +23,7 @@
  *      breaks if a locale is missing because the class/icon anchors fire
  *      first.
  *
- * Last verified: 2026-05 against the live notebooklm.google.com layout
+ * Last verified: 2026-05 against the live NotebookLM application layout.
  * (DE, EN locales).
  */
 
