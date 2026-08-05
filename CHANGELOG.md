@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.8] - 2026-08-05
+
+### Fixed
+
+- Unified session initialization and question submission on the centralized
+  `Selectors.chat.queryInput` policy instead of retaining stale, duplicated
+  locale-specific readiness selectors.
+- Added bounded query-composer recovery for blocking overlays, stale
+  `addSource` URL state, delayed hydration within the configured browser
+  timeout, and one final reload while preserving the requested notebook
+  identity.
+- Added secret-free readiness diagnostics and required a current readiness
+  probe before source mutations, local-audio/YouTube uploads, and Audio
+  Overview generation can begin.
+- Added regressions for every registered query-input selector, delayed and
+  overlay-hidden composers, stale URL cleanup, identity divergence, headless-
+  independent policy, and the pre-filechooser readiness gate.
+- Updated `@modelcontextprotocol/sdk` to the 1.30.0 release line and pinned
+  security overrides for `fast-uri` 3.1.5, `hono` 4.13.0, `ip-address` 10.4.0,
+  and `brace-expansion` 5.0.9; this remains on MCP SDK v1.
+- Added the reviewed `0.0.7` release to the trusted-release manifest. This
+  release does not change authentication or the browser-selection architecture.
+
 ## [0.0.7] - 2026-08-03
 
 ### Fixed

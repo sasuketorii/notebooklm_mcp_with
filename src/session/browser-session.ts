@@ -59,6 +59,11 @@ import {
   extractTranscriptFromSourceViewer,
   type TranscriptResult,
 } from "../notebooklm/transcript-export.js";
+import {
+  formatQueryInputDiagnostics,
+  recoverVisibleQueryInput,
+} from "../notebooklm/query-input.js";
+import { Selectors } from "../notebooklm/selectors.js";
 
 export function shouldReuseInitializedPage(initialized: boolean, pageClosed: boolean): boolean {
   return initialized && !pageClosed;
@@ -154,7 +159,7 @@ export class BrowserSession {
       log.success(`  ✅ Created new page`);
 
       // Navigate to notebook
-      log.info(`  🌐 Navigating to: ${this.notebookUrl}`);
+      log.info("  🌐 Navigating to requested notebook...");
       await this.page.goto(this.notebookUrl, {
         waitUntil: "domcontentloaded",
         timeout: CONFIG.browserTimeout,
@@ -213,44 +218,26 @@ export class BrowserSession {
   /**
    * Wait for NotebookLM interface to be ready
    *
-   * IMPORTANT: Matches Python implementation EXACTLY!
-   * - Uses SPECIFIC selectors (textarea.query-box-input)
-   * - Checks ONLY for "visible" state (NOT disabled!)
-   * - NO placeholder checks (let NotebookLM handle that!)
-   *
-   * Based on Python _wait_for_ready() from browser_session.py:104-113
+   * Uses the same centralized selector policy and bounded recovery sequence as
+   * question submission. Visibility is the readiness criterion; disabled or
+   * placeholder state remains NotebookLM's responsibility.
    */
   private async waitForNotebookLMReady(): Promise<void> {
     if (!this.page) {
       throw new Error("Page not initialized");
     }
 
-    try {
-      // PRIMARY: Exact Python selector - textarea.query-box-input
-      log.info("  ⏳ Waiting for chat input (textarea.query-box-input)...");
-      await this.page.waitForSelector("textarea.query-box-input", {
-        timeout: 10000, // Python uses 10s timeout
-        state: "visible", // ONLY check visibility (NO disabled check!)
-      });
-      log.success("  ✅ Chat input ready!");
-    } catch {
-      // FALLBACK: Python alternative selector
-      try {
-        log.info("  ⏳ Trying fallback selector (aria-label)...");
-        await this.page.waitForSelector('textarea[aria-label="Feld für Anfragen"]', {
-          timeout: 5000, // Python uses 5s for fallback
-          state: "visible",
-        });
-        log.success("  ✅ Chat input ready (fallback)!");
-      } catch (error) {
-        log.error(`  ❌ NotebookLM interface not ready: ${error}`);
-        throw new Error(
-          "Could not find NotebookLM chat input. " +
-            "Please ensure the notebook page has loaded correctly.",
-          { cause: error }
-        );
-      }
+    log.info("  ⏳ Waiting for NotebookLM query composer...");
+    const result = await recoverVisibleQueryInput(this.page, {
+      expectedNotebookUrl: this.notebookUrl,
+      timeoutMs: CONFIG.browserTimeout,
+    });
+    if (!result.selector) {
+      const diagnostics = formatQueryInputDiagnostics(result.diagnostics);
+      log.error(`  ❌ NotebookLM query composer not ready; diagnostics=${diagnostics}`);
+      throw new Error(`NotebookLM query composer was not visible; diagnostics=${diagnostics}`);
     }
+    log.success("  ✅ NotebookLM query composer ready!");
   }
 
   private isPageClosedSafe(): boolean {
@@ -468,7 +455,7 @@ export class BrowserSession {
    */
   async addSource(input: AddSourceInput): Promise<AddSourceResult> {
     return this.runExclusive(async () => {
-      await this.ensureBoundNotebookPageUnlocked();
+      await this.ensureMutationReadyUnlocked();
       return addSourceToPage(this.page!, input);
     });
   }
@@ -476,14 +463,14 @@ export class BrowserSession {
   /** Upload one or more local audio files using NotebookLM's source dialog. */
   async addAudioSource(input: AddAudioSourceInput): Promise<AddAudioSourceResult> {
     return this.runExclusive(async () => {
-      await this.ensureBoundNotebookPageUnlocked();
+      await this.ensureMutationReadyUnlocked();
       return addAudioSourceToPage(this.page!, input);
     });
   }
 
   async addYouTubeSource(input: AddYouTubeSourceInput): Promise<AddYouTubeSourceResult> {
     return this.runExclusive(async () => {
-      await this.ensureBoundNotebookPageUnlocked();
+      await this.ensureMutationReadyUnlocked();
       return addYouTubeSourceOnPage(this.page!, input);
     });
   }
@@ -543,11 +530,22 @@ export class BrowserSession {
   }
 
   /**
+   * Mutation invariant: current composer readiness is probed immediately
+   * before any operation that can change notebook state or open an upload UI.
+   * Session initialization is not treated as a durable readiness cache because
+   * overlays and URL state can change while the notebook identity stays equal.
+   */
+  private async ensureMutationReadyUnlocked(): Promise<void> {
+    await this.ensureBoundNotebookPageUnlocked();
+    await this.waitForNotebookLMReady();
+  }
+
+  /**
    * Generate an Audio Overview for the active notebook (issue #11).
    */
   async generateAudio(options: GenerateAudioOptions = {}): Promise<AudioGenerationResult> {
     return this.runExclusive(async () => {
-      await this.ensureBoundNotebookPageUnlocked();
+      await this.ensureMutationReadyUnlocked();
       return generateAudioOnPage(this.page!, options);
     });
   }
@@ -599,98 +597,25 @@ export class BrowserSession {
   /**
    * Find the chat input element
    *
-   * IMPORTANT: Matches Python implementation EXACTLY!
-   * - Uses SPECIFIC selectors from Python
-   * - Checks ONLY visibility (NOT disabled state!)
-   *
-   * Based on Python ask() method from browser_session.py:166-171
+   * Uses the same centralized selector registry and bounded recovery policy as
+   * initialization. No selector is duplicated here.
    */
   private async findChatInput(): Promise<string | null> {
     if (!this.page) {
       return null;
     }
 
-    const selectors = [
-      // Stable class — language-agnostic.
-      "textarea.query-box-input",
-      // Locale-bound aria-label fallbacks for older builds.
-      'textarea[aria-label="Feld für Anfragen"]',
-      'textarea[aria-label*="anfrag" i]',
-      'textarea[aria-label*="query" i]',
-      'textarea[aria-label*="zone de requete" i]',
-      'textarea[aria-label*="requete" i]',
-      'textarea[aria-label*="consulta" i]',
-      'textarea[aria-label*="domanda" i]',
-    ];
-
-    const tryFind = async (): Promise<string | null> => {
-      for (const selector of selectors) {
-        try {
-          const element = await this.page!.$(selector);
-          if (element && (await element.isVisible())) {
-            return selector;
-          }
-        } catch {
-          continue;
-        }
-      }
-      return null;
-    };
-
-    let hit = await tryFind();
-    if (hit) {
-      log.success(`  ✅ Found chat input: ${hit}`);
-      return hit;
+    const result = await recoverVisibleQueryInput(this.page, {
+      expectedNotebookUrl: this.notebookUrl,
+      timeoutMs: CONFIG.browserTimeout,
+    });
+    if (result.selector) {
+      log.success(`  ✅ Found chat input: ${result.selector}`);
+      return result.selector;
     }
-
-    // Recovery: chat input is most often hidden because (a) a leftover Add-
-    // source / customise modal is still mounted, (b) a citation source-panel
-    // is open, or (c) we navigated to `?addSource=true` and never cleaned the
-    // URL up. Try all three remedies and re-probe.
-    log.warning("  ⚠️  Chat input not visible, attempting recovery…");
-    try {
-      await this.page.keyboard.press("Escape").catch(() => undefined);
-      await this.page.keyboard.press("Escape").catch(() => undefined);
-      await randomDelay(200, 400);
-      hit = await tryFind();
-      if (hit) {
-        log.success(`  ✅ Found chat input after Escape: ${hit}`);
-        return hit;
-      }
-
-      const url = this.page.url();
-      if (url.includes("addSource=true") || url.includes("?")) {
-        const cleanUrl = url.replace(/[?&]addSource=true/g, "").replace(/&$/, "");
-        if (cleanUrl !== url) {
-          log.info(`  ↻ Cleaning URL state: ${url} → ${cleanUrl}`);
-          await this.page
-            .goto(cleanUrl, { waitUntil: "domcontentloaded", timeout: 15_000 })
-            .catch(() => undefined);
-          await randomDelay(800, 1200);
-          hit = await tryFind();
-          if (hit) {
-            log.success(`  ✅ Found chat input after URL clean: ${hit}`);
-            return hit;
-          }
-        }
-      }
-
-      // Last resort: reload the notebook page entirely.
-      log.warning("  ⚠️  Reloading notebook page as last resort…");
-      await this.page
-        .goto(this.notebookUrl, { waitUntil: "domcontentloaded", timeout: 20_000 })
-        .catch(() => undefined);
-      await randomDelay(1500, 2500);
-      hit = await tryFind();
-      if (hit) {
-        log.success(`  ✅ Found chat input after reload: ${hit}`);
-        return hit;
-      }
-    } catch (err) {
-      log.warning(`  ⚠️  Recovery failed: ${err}`);
-    }
-
-    log.error("  ❌ Could not find visible chat input");
+    log.error(
+      `  ❌ Could not find visible chat input; diagnostics=${formatQueryInputDiagnostics(result.diagnostics)}`
+    );
     return null;
   }
 
@@ -757,7 +682,7 @@ export class BrowserSession {
 
     // Also check if chat input is disabled (sometimes NotebookLM disables input when rate limited)
     try {
-      const inputSelector = "textarea.query-box-input";
+      const inputSelector = Selectors.chat.queryInput[0];
       const input = await this.page.$(inputSelector);
       if (input) {
         const isDisabled = await input.evaluate((el) => {

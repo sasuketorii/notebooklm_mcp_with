@@ -1,6 +1,6 @@
 {
   "name": "notebooklm-mcp-audio-custom",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "MCP server for Google NotebookLM — chat, source ingestion, audio overviews, citations, stdio + Streamable-HTTP transports.",
   "type": "module",
   "bin": {
@@ -12,11 +12,12 @@
     "watch": "tsc --watch",
     "dev": "tsx watch src/index.ts",
     "prepare": "npm run build",
-    "test": "npm run test:workflow-security && npm run test:lineage && npm run test:trusted-releases && npm run test:install-release && npm run test:auth-persistence && npm run test:tool-compatibility && npm run test:hosts && npm run test:audio && npm run test:http && npm run test:core && npm run test:permissions && npm run test:launcher && npm run test:installer && npm run test:youtube && npm run test:readiness && npm run test:transcript && npm run test:workflow && npm run test:chat && npm run test:source-release",
+    "test": "npm run test:workflow-security && npm run test:lineage && npm run test:trusted-releases && npm run test:install-release && npm run test:auth-persistence && npm run test:tool-compatibility && npm run test:hosts && npm run test:audio && npm run test:http && npm run test:core && npm run test:permissions && npm run test:launcher && npm run test:installer && npm run test:youtube && npm run test:readiness && npm run test:query-input && npm run test:transcript && npm run test:workflow && npm run test:chat && npm run test:source-release",
     "test:auth-persistence": "npm run build && node scripts/test-auth-persistence.mjs",
     "test:source-release": "bash scripts/test-source-release.sh",
     "test:youtube": "node scripts/test-youtube-source.mjs",
     "test:readiness": "node scripts/test-source-readiness.mjs",
+    "test:query-input": "npm run build && node scripts/test-query-input-readiness.mjs",
     "test:transcript": "node scripts/test-transcript-export.mjs",
     "test:workflow": "node scripts/test-workflow-integration.mjs",
     "test:chat": "npm run build && node scripts/test-chat-stability.mjs",
@@ -69,7 +70,7 @@
     "docs"
   ],
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "dotenv": "^16.4.0",
     "env-paths": "^3.0.0",
     "globby": "^16.2.2",
@@ -92,9 +93,10 @@
   },
   "overrides": {
     "@hono/node-server": "^2.0.11",
-    "minimatch": {
-      "brace-expansion": "^5.0.8"
-    },
+    "fast-uri": "3.1.5",
+    "hono": "4.13.0",
+    "ip-address": "10.4.0",
+    "brace-expansion": "5.0.9",
     "micromatch": {
       "picomatch": "^2.3.2"
     }
