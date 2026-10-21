@@ -70,7 +70,7 @@
     "docs"
   ],
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "dotenv": "^16.4.0",
     "env-paths": "^3.0.0",
     "globby": "^16.2.2",
